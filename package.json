@@ -6,9 +6,7 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "tsc --noEmit && vite build",
-    "build:vercel": "npm run build && node scripts/sync-published-maps.mjs",
     "check": "tsc --noEmit",
-    "check:published-maps": "node scripts/sync-published-maps.mjs --manifest-only",
     "test": "vitest run",
     "test:e2e": "playwright test",
     "test:e2e:install": "playwright install chromium",
