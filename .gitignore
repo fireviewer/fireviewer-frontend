@@ -8,6 +8,7 @@ playwright-report/
 .env.*
 !.env.example
 public/maps/
+.artifacts/
 *.log
 *.zip
 *.tar
