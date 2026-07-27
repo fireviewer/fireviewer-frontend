@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "contracts": [
+    {
+      "producer": "fireviewer/fireviewer-backend",
+      "tag": "v0.1.0",
+      "path": "contracts/viewer-manifest/v2/viewer-manifest.schema.json",
+      "sha256": "58c9ea05ee9f13653a5c468e58c5f1b6350c1cdc86399048445bd184ba01a0fb"
+    },
+    {
+      "producer": "fireviewer/fireviewer-spatial",
+      "tag": "v0.1.0",
+      "path": "contracts/spatial/v1/spatial-contract.schema.json",
+      "sha256": "be615a44376d7cfb7d9116951f4ce41ea9eb3a6ba6d5f4264a1ee218c8487723"
+    }
+  ]
+}
+
