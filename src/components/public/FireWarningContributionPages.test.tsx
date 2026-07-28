@@ -7,11 +7,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const incidentApi = vi.hoisted(() => ({
   submitPublicIncidentReport: vi.fn(),
 }));
+const contributionApi = vi.hoisted(() => ({
+  submitPublicContribution: vi.fn(),
+  getPublicContribution: vi.fn(),
+}));
 
 vi.mock('../../lib/publicIncidentView', async (importOriginal) => {
   const original = await importOriginal<typeof import('../../lib/publicIncidentView')>();
   return { ...original, submitPublicIncidentReport: incidentApi.submitPublicIncidentReport };
 });
+vi.mock('../../lib/publicContributions', () => contributionApi);
 
 import {
   FireWarningContributionTrackingPage,
@@ -22,7 +27,10 @@ import {
 describe('parcours publics de contribution', () => {
   beforeEach(() => {
     localStorage.clear();
+    sessionStorage.clear();
     incidentApi.submitPublicIncidentReport.mockReset();
+    contributionApi.submitPublicContribution.mockReset();
+    contributionApi.getPublicContribution.mockReset();
   });
 
   afterEach(() => {
@@ -30,7 +38,22 @@ describe('parcours publics de contribution', () => {
     vi.restoreAllMocks();
   });
 
-  it('impose la barrière d’urgence puis enregistre uniquement un brouillon local avec consentements explicites', async () => {
+  it('impose la barrière d’urgence puis transmet réellement la contribution privée', async () => {
+    contributionApi.submitPublicContribution.mockResolvedValue({
+      contribution_id: 'CONTRIB-20260715-TEST0001',
+      kind: 'new_fire',
+      fire_id: null,
+      state: 'PENDING',
+      received_at: '2026-07-15T10:00:00Z',
+      reviewed_at: null,
+      review_reason: null,
+      purge_after: '2026-08-15T10:00:00Z',
+      media_count: 0,
+      location_label: 'Massif de secteur synthétique',
+      observation_type: 'Fumée',
+      observed_at: '2026-07-15T09:55:00Z',
+      version: 1,
+    });
     const user = userEvent.setup();
     render(<FireWarningReportPage />);
 
@@ -53,35 +76,43 @@ describe('parcours publics de contribution', () => {
     for (const consent of consents) expect(consent).not.toBeChecked();
     await user.click(screen.getByRole('checkbox', { name: /Analyser cette contribution/ }));
     await user.click(screen.getByRole('button', { name: /Continuer/ }));
-    await user.click(screen.getByRole('button', { name: /Enregistrer le brouillon/ }));
+    await user.click(screen.getByRole('button', { name: /Envoyer la contribution/ }));
 
-    expect(screen.getByRole('heading', { name: 'Aucune donnée n’a été transmise' })).toBeVisible();
-    const stored = localStorage.getItem('fw:contribution-drafts:v1');
-    expect(stored).toContain('Massif de secteur synthétique');
-    expect(stored).toContain('"status":"local-draft"');
+    expect(await screen.findByRole('heading', { name: 'Les données ont été transmises en privé' })).toBeVisible();
+    expect(contributionApi.submitPublicContribution).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: 'new_fire',
+        location: expect.objectContaining({ label: 'Massif de secteur synthétique' }),
+        consents: expect.objectContaining({ private_analysis: true, public_display: false }),
+      }),
+      expect.any(Function),
+    );
+    expect(localStorage.getItem('fw:contribution-drafts:v1')).toBeNull();
     expect(incidentApi.submitPublicIncidentReport).not.toHaveBeenCalled();
   });
 
-  it('affiche un brouillon local sans inventer un statut serveur', () => {
-    localStorage.setItem('fw:contribution-drafts:v1', JSON.stringify([{
-      id: 'LOCAL-20260715-TEST0001',
-      kind: 'evidence',
-      fireId: 'FR-83-00042',
-      createdAt: '2026-07-15T10:00:00Z',
-      updatedAt: '2026-07-15T10:00:00Z',
-      status: 'local-draft',
-      location: { mode: 'place', label: 'Versant est', latitude: '', longitude: '', uncertainty: '' },
-      observation: { type: 'Fumée', date: '2026-07-15', time: '12:00', direct: true, description: 'Fumée observée depuis un point sûr.' },
-      media: null,
-      consent: { processing: true, retention: false, publicDisplay: false, modelDisplay: false },
-      contactEmail: '',
-    }]));
+  it('affiche le statut enregistré par le backend avec le reçu privé', async () => {
+    contributionApi.getPublicContribution.mockResolvedValue({
+      contribution_id: 'CONTRIB-20260715-TEST0001',
+      kind: 'incident_evidence',
+      fire_id: 'FR-83-00042',
+      state: 'PENDING',
+      received_at: '2026-07-15T10:00:00Z',
+      reviewed_at: null,
+      review_reason: null,
+      purge_after: '2026-08-15T10:00:00Z',
+      media_count: 1,
+      location_label: 'Versant est',
+      observation_type: 'Fumée',
+      observed_at: '2026-07-15T12:00:00Z',
+      version: 1,
+    });
 
-    render(<FireWarningContributionTrackingPage contributionId="LOCAL-20260715-TEST0001" />);
+    render(<FireWarningContributionTrackingPage contributionId="CONTRIB-20260715-TEST0001" />);
 
-    expect(screen.getByText('Brouillon local · non transmis')).toBeVisible();
+    expect(await screen.findByText('Reçue · en attente de vérification')).toBeVisible();
     expect(screen.getByText('Versant est')).toBeVisible();
-    expect(screen.queryByText('Acceptée pour publication')).not.toBeInTheDocument();
+    expect(contributionApi.getPublicContribution).toHaveBeenCalledWith('CONTRIB-20260715-TEST0001');
   });
 
   it('transmet réellement un signalement d’erreur et affiche le reçu serveur', async () => {

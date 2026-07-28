@@ -4,27 +4,17 @@ import {
   type PublicIncidentReportReceipt,
   type PublicReportCategory,
 } from '../../lib/publicIncidentView';
+import {
+  getPublicContribution,
+  submitPublicContribution,
+  type PublicContributionStatus,
+} from '../../lib/publicContributions';
 import { PageHero } from './FireWarningBasicPages';
 import { PublicIcon, type PublicIconName } from './PublicIcon';
 import './firewarning-contributions.css';
 
-const STORAGE_KEY = 'fw:contribution-drafts:v1';
 type ContributionKind = 'new-fire' | 'evidence';
 type LocationMode = 'place' | 'device' | 'manual';
-
-export interface LocalContributionDraft {
-  readonly id: string;
-  readonly kind: ContributionKind;
-  readonly fireId: string | null;
-  readonly createdAt: string;
-  readonly updatedAt: string;
-  readonly status: 'local-draft';
-  readonly location: { readonly mode: LocationMode; readonly label: string; readonly latitude: string; readonly longitude: string; readonly uncertainty: string };
-  readonly observation: { readonly type: string; readonly date: string; readonly time: string; readonly direct: boolean; readonly description: string };
-  readonly media: { readonly name: string; readonly type: string; readonly size: number; readonly capturedAt: string; readonly direction: string } | null;
-  readonly consent: { readonly processing: boolean; readonly retention: boolean; readonly publicDisplay: boolean; readonly modelDisplay: boolean };
-  readonly contactEmail: string;
-}
 
 interface FormState {
   locationMode: LocationMode;
@@ -58,29 +48,6 @@ function initialState(): FormState {
     consentProcessing: false, consentRetention: false, consentPublicDisplay: false,
     consentModelDisplay: false, contactEmail: '',
   };
-}
-
-function readDrafts(): LocalContributionDraft[] {
-  try {
-    const value = JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]') as unknown;
-    return Array.isArray(value) ? value.filter((item): item is LocalContributionDraft => Boolean(item && typeof item === 'object' && 'id' in item)) : [];
-  } catch {
-    return [];
-  }
-}
-
-function storeDraft(draft: LocalContributionDraft): void {
-  const otherDrafts = readDrafts().filter((item) => item.id !== draft.id);
-  localStorage.setItem(STORAGE_KEY, JSON.stringify([draft, ...otherDrafts].slice(0, 20)));
-}
-
-function deleteDraft(id: string): void {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(readDrafts().filter((item) => item.id !== id)));
-}
-
-function localId(): string {
-  const random = typeof crypto.randomUUID === 'function' ? crypto.randomUUID().slice(0, 8) : Math.random().toString(36).slice(2, 10);
-  return 'LOCAL-' + new Date().toISOString().slice(0, 10).replaceAll('-', '') + '-' + random.toUpperCase();
 }
 
 function useLowData(): boolean {
@@ -142,7 +109,9 @@ function ContributionForm({ kind, fireId }: { readonly kind: ContributionKind; r
   const [state, setState] = useState<FormState>(initialState);
   const [error, setError] = useState<string | null>(null);
   const [locating, setLocating] = useState(false);
-  const [saved, setSaved] = useState<LocalContributionDraft | null>(null);
+  const [saved, setSaved] = useState<PublicContributionStatus | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const lowData = useLowData();
 
@@ -170,24 +139,61 @@ function ContributionForm({ kind, fireId }: { readonly kind: ContributionKind; r
     setError(null); setStep((value) => Math.min(steps.length - 1, value + 1));
   };
 
-  const save = () => {
+  const save = async () => {
     const issue = validateStep(4, state);
     if (issue) { setStep(4); setError(issue); return; }
-    const timestamp = new Date().toISOString();
-    const draft: LocalContributionDraft = {
-      id: localId(), kind, fireId: fireId || null, createdAt: timestamp, updatedAt: timestamp, status: 'local-draft',
-      location: { mode: state.locationMode, label: state.locationLabel.trim(), latitude: state.latitude, longitude: state.longitude, uncertainty: state.uncertainty },
-      observation: { type: state.observationType, date: state.observationDate, time: state.observationTime, direct: state.direct, description: state.description.trim() },
-      media: state.media ? { name: state.media.name, type: state.media.type, size: state.media.size, capturedAt: state.mediaCapturedAt, direction: state.mediaDirection } : null,
-      consent: { processing: state.consentProcessing, retention: state.consentRetention, publicDisplay: state.consentPublicDisplay, modelDisplay: state.consentModelDisplay },
-      contactEmail: state.contactEmail.trim(),
-    };
-    try { storeDraft(draft); setSaved(draft); setError(null); } catch { setError('Le navigateur a refusé l’enregistrement local. Aucune donnée n’a été transmise.'); }
+    setSubmitting(true);
+    setUploadProgress(state.media ? 0 : null);
+    setError(null);
+    try {
+      const result = await submitPublicContribution({
+        kind: kind === 'evidence' ? 'incident_evidence' : 'new_fire',
+        fire_id: fireId,
+        location: {
+          mode: state.locationMode,
+          label: state.locationLabel.trim() || null,
+          latitude: state.latitude ? Number(state.latitude) : null,
+          longitude: state.longitude ? Number(state.longitude) : null,
+          uncertainty_m: state.uncertainty ? Number(state.uncertainty) : null,
+        },
+        observation: {
+          observation_type: state.observationType,
+          observed_at: new Date(
+            `${state.observationDate}T${state.observationTime}:00`,
+          ).toISOString(),
+          direct_observation: state.direct,
+          description: state.description.trim(),
+        },
+        media: state.media ? {
+          file: state.media,
+          captured_at: state.mediaCapturedAt
+            ? new Date(state.mediaCapturedAt).toISOString()
+            : null,
+          direction: state.mediaDirection.trim() || null,
+        } : null,
+        consents: {
+          private_analysis: true,
+          retain_evidence: state.consentRetention,
+          public_display: state.consentPublicDisplay,
+          spatial_display: state.consentModelDisplay,
+        },
+        contact_email: state.contactEmail.trim() || null,
+      }, setUploadProgress);
+      setSaved(result);
+    } catch (submissionError) {
+      setError(
+        submissionError instanceof Error
+          ? submissionError.message
+          : 'La contribution n’a pas pu être transmise. Vérifiez votre connexion.',
+      );
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   if (!gatePassed) return <EmergencyGate onContinue={() => setGatePassed(true)} />;
 
-  if (saved) return <section className="fw-contribution-success" aria-live="polite"><span><PublicIcon name="check-circle" size={31} /></span><p className="fw-kicker">Brouillon enregistré</p><h2>Aucune donnée n’a été transmise</h2><p>Le backend public de contribution n’est pas encore disponible. Le brouillon est conservé uniquement dans ce navigateur, sans le fichier image brut.</p><dl><div><dt>Identifiant local</dt><dd><code>{saved.id}</code></dd></div><div><dt>État</dt><dd>Brouillon local · non transmis</dd></div></dl><div className="fw-form-actions"><a className="fw-button fw-button--primary" href={'/contribution/' + saved.id}>Consulter le brouillon<PublicIcon name="arrow" size={17} /></a><a className="fw-button fw-button--outline" href={fireId ? '/incendie/' + fireId : '/incendies'}>Retour</a></div></section>;
+  if (saved) return <section className="fw-contribution-success" aria-live="polite"><span><PublicIcon name="check-circle" size={31} /></span><p className="fw-kicker">Contribution reçue</p><h2>Les données ont été transmises en privé</h2><p>La contribution reste privée pendant sa vérification. L’analyse privée ne constitue pas une autorisation de publication.</p><dl><div><dt>Identifiant de suivi</dt><dd><code>{saved.contribution_id}</code></dd></div><div><dt>État</dt><dd>{saved.state === 'PENDING' ? 'Reçue · en attente de vérification' : saved.state}</dd></div></dl><div className="fw-form-actions"><a className="fw-button fw-button--primary" href={'/contribution/' + saved.contribution_id}>Suivre la contribution<PublicIcon name="arrow" size={17} /></a><a className="fw-button fw-button--outline" href={fireId ? '/incendie/' + fireId : '/incendies'}>Retour</a></div></section>;
 
   return <section className="fw-contribution-workspace">
     {kind === 'evidence' ? <aside className="fw-flow-notice"><PublicIcon name="info" size={20} /><span>Cette preuve est préparée pour l’incident <strong>{fireId}</strong>. Elle ne sera jamais publiée automatiquement.</span></aside> : null}
@@ -204,10 +210,10 @@ function ContributionForm({ kind, fireId }: { readonly kind: ContributionKind; r
 
       {step === 4 ? <section aria-labelledby="step-consent"><p className="fw-kicker">Étape 5 sur 6</p><h2 id="step-consent">Choisissez précisément vos accords</h2><p>Aucune case n’est cochée par défaut. La publication reste indépendante du traitement.</p><div className="fw-consent-list"><Consent required checked={state.consentProcessing} onChange={(value) => update('consentProcessing', value)} title="Analyser cette contribution" text="Autoriser l’examen de la description, de la position et de l’image éventuelle." /><Consent checked={state.consentRetention} onChange={(value) => update('consentRetention', value)} title="Conserver la preuve après vérification" text="Autorisation distincte de conservation." /><Consent checked={state.consentPublicDisplay} onChange={(value) => update('consentPublicDisplay', value)} title="Afficher l’image sur la page publique" text="Uniquement depuis son marqueur, jamais dans une galerie." /><Consent checked={state.consentModelDisplay} onChange={(value) => update('consentModelDisplay', value)} title="Afficher un marqueur sur le modèle 3D" text="La position peut être généralisée pour protéger les personnes." /></div><Field label="E-mail de contact facultatif"><input type="email" value={state.contactEmail} onChange={(event) => update('contactEmail', event.target.value)} placeholder="vous@exemple.fr" autoComplete="email" /></Field></section> : null}
 
-      {step === 5 ? <section aria-labelledby="step-review"><p className="fw-kicker">Étape 6 sur 6</p><h2 id="step-review">Vérifiez le brouillon</h2><dl className="fw-review-list"><div><dt>Incident</dt><dd>{fireId || 'Nouveau feu à qualifier'}</dd></div><div><dt>Localisation</dt><dd>{state.locationLabel || (state.latitude ? state.latitude + ', ' + state.longitude : 'Non renseignée')}</dd></div><div><dt>Observation</dt><dd>{state.observationType} · {state.observationDate} à {state.observationTime}</dd></div><div><dt>Image</dt><dd>{state.media ? state.media.name + ' (' + Math.ceil(state.media.size / 1024) + ' Ko)' : 'Aucune image'}</dd></div><div><dt>Publication publique</dt><dd>{state.consentPublicDisplay ? 'Autorisée sous réserve de validation' : 'Non autorisée'}</dd></div></dl><aside className="fw-flow-warning"><PublicIcon name="warning" size={22} /><span><strong>Enregistrement local uniquement.</strong> Cette action ne contacte ni FireWarning ni les secours. Le fichier image n’est pas conservé dans le brouillon.</span></aside></section> : null}
+      {step === 5 ? <section aria-labelledby="step-review"><p className="fw-kicker">Étape 6 sur 6</p><h2 id="step-review">Vérifiez avant l’envoi</h2><dl className="fw-review-list"><div><dt>Incident</dt><dd>{fireId || 'Nouveau feu à qualifier'}</dd></div><div><dt>Localisation</dt><dd>{state.locationLabel || (state.latitude ? state.latitude + ', ' + state.longitude : 'Non renseignée')}</dd></div><div><dt>Observation</dt><dd>{state.observationType} · {state.observationDate} à {state.observationTime}</dd></div><div><dt>Image</dt><dd>{state.media ? state.media.name + ' (' + Math.ceil(state.media.size / 1024) + ' Ko)' : 'Aucune image'}</dd></div><div><dt>Publication publique</dt><dd>{state.consentPublicDisplay ? 'Autorisée sous réserve de validation' : 'Non autorisée'}</dd></div></dl><aside className="fw-flow-warning"><PublicIcon name="warning" size={22} /><span><strong>Transmission privée.</strong> Cette action transmet les données à FireWarning mais ne contacte pas les secours et ne publie rien automatiquement.</span></aside>{uploadProgress !== null ? <p role="status">Envoi de l’image : {uploadProgress} %</p> : null}</section> : null}
 
       {error ? <p className="fw-form-error" role="alert"><PublicIcon name="warning" size={18} />{error}</p> : null}
-      <footer className="fw-form-actions">{step > 0 ? <button className="fw-button fw-button--outline" type="button" onClick={() => { setError(null); setStep((value) => value - 1); }}><PublicIcon name="arrow-left" size={17} />Retour</button> : <a className="fw-button fw-button--outline" href={fireId ? '/incendie/' + fireId : '/'}>Annuler</a>}{step < steps.length - 1 ? <button className="fw-button fw-button--primary" type="button" onClick={next}>Continuer<PublicIcon name="arrow" size={17} /></button> : <button className="fw-button fw-button--primary" type="button" onClick={save}>Enregistrer le brouillon<PublicIcon name="arrow" size={17} /></button>}</footer>
+      <footer className="fw-form-actions">{step > 0 ? <button className="fw-button fw-button--outline" type="button" disabled={submitting} onClick={() => { setError(null); setStep((value) => value - 1); }}><PublicIcon name="arrow-left" size={17} />Retour</button> : <a className="fw-button fw-button--outline" href={fireId ? '/incendie/' + fireId : '/'}>Annuler</a>}{step < steps.length - 1 ? <button className="fw-button fw-button--primary" type="button" onClick={next}>Continuer<PublicIcon name="arrow" size={17} /></button> : <button className="fw-button fw-button--primary" type="button" disabled={submitting} onClick={() => void save()}>{submitting ? 'Transmission…' : 'Envoyer la contribution'}<PublicIcon name="arrow" size={17} /></button>}</footer>
     </div>
   </section>;
 }
@@ -258,9 +264,44 @@ export function FireWarningIncidentErrorPage({ fireId }: { readonly fireId: stri
 }
 
 export function FireWarningContributionTrackingPage({ contributionId }: { readonly contributionId: string }) {
-  const [draft, setDraft] = useState<LocalContributionDraft | null>(() => readDrafts().find((item) => item.id === contributionId) || null);
-  const [deleted, setDeleted] = useState(false);
-  if (deleted) return <><CompactHeading icon="trash" eyebrow="Contribution locale" title="Brouillon supprimé" description="Les métadonnées de ce brouillon ont été retirées de ce navigateur." /><div className="fw-page fw-standard-page"><a className="fw-button fw-button--primary" href="/signaler">Créer un nouveau signalement</a></div></>;
-  if (!draft) return <><CompactHeading icon="search" eyebrow="Suivi d’une contribution" title="Contribution introuvable" description="Aucun brouillon local ne correspond à cet identifiant dans ce navigateur." /><div className="fw-page fw-standard-page fw-contribution-page"><section className="fw-flow-empty"><PublicIcon name="info" size={28} /><h2>Le suivi serveur n’est pas encore disponible</h2><p>Les brouillons ne sont visibles que sur l’appareil où ils ont été enregistrés.</p><a className="fw-button fw-button--primary" href="/signaler">Signaler un feu</a></section></div></>;
-  return <><CompactHeading icon="bookmark" eyebrow="Suivi local" title={draft.id} description="Ce brouillon est privé, stocké sur cet appareil et n’a pas été transmis.">{draft.fireId ? <a href={'/incendie/' + draft.fireId}>Voir l’incident {draft.fireId}</a> : null}</CompactHeading><div className="fw-page fw-standard-page fw-contribution-page"><section className="fw-tracking-card"><header><span className="fw-local-status"><PublicIcon name="clock" size={17} />Brouillon local · non transmis</span><small>Mis à jour le {new Date(draft.updatedAt).toLocaleString('fr-FR')}</small></header><dl className="fw-review-list"><div><dt>Type</dt><dd>{draft.kind === 'evidence' ? 'Preuve liée à un incident' : 'Nouveau feu à qualifier'}</dd></div><div><dt>Localisation</dt><dd>{draft.location.label || draft.location.latitude + ', ' + draft.location.longitude}</dd></div><div><dt>Observation</dt><dd>{draft.observation.type} · {draft.observation.date} à {draft.observation.time}</dd></div><div><dt>Image référencée</dt><dd>{draft.media ? draft.media.name + ' · fichier non conservé' : 'Aucune'}</dd></div><div><dt>Affichage public autorisé</dt><dd>{draft.consent.publicDisplay ? 'Oui, après validation' : 'Non'}</dd></div></dl><section><h2>Description</h2><p>{draft.observation.description}</p></section><aside className="fw-flow-warning"><PublicIcon name="warning" size={22} /><span>Supprimer ce brouillon retire uniquement sa copie locale. Il n’a jamais été transmis.</span></aside><footer className="fw-form-actions"><a className="fw-button fw-button--outline" href={draft.fireId ? '/incendie/' + draft.fireId : '/incendies'}>Retour</a><button className="fw-button fw-button--outline" type="button" onClick={() => { deleteDraft(draft.id); setDraft(null); setDeleted(true); }}><PublicIcon name="trash" size={17} />Supprimer le brouillon</button></footer></section></div></>;
+  const [contribution, setContribution] = useState<PublicContributionStatus | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void getPublicContribution(contributionId)
+      .then((result) => {
+        if (active) setContribution(result);
+      })
+      .catch((trackingError: unknown) => {
+        if (active) {
+          setError(
+            trackingError instanceof Error
+              ? trackingError.message
+              : 'Le suivi privé de cette contribution est indisponible.',
+          );
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [contributionId]);
+
+  if (error) {
+    return <><CompactHeading icon="search" eyebrow="Suivi d’une contribution" title="Suivi privé indisponible" description={error} /><div className="fw-page fw-standard-page fw-contribution-page"><section className="fw-flow-empty"><PublicIcon name="info" size={28} /><h2>Cette contribution ne peut pas être consultée ici</h2><p>Le jeton de suivi reste dans la session qui a réalisé l’envoi. Aucune donnée privée n’est exposée sans ce jeton.</p><a className="fw-button fw-button--primary" href="/signaler">Signaler un feu</a></section></div></>;
+  }
+
+  if (!contribution) {
+    return <><CompactHeading icon="clock" eyebrow="Suivi d’une contribution" title="Chargement du reçu privé" description="FireWarning vérifie l’état enregistré par le serveur." /><div className="fw-page fw-standard-page fw-contribution-page"><p role="status">Chargement…</p></div></>;
+  }
+
+  const stateLabel: Record<PublicContributionStatus['state'], string> = {
+    OPEN: 'Envoi en cours',
+    PENDING: 'Reçue · en attente de vérification',
+    ACCEPTED: 'Acceptée après vérification',
+    REJECTED: 'Écartée après vérification',
+    WITHDRAWN: 'Retirée',
+    PURGED: 'Données supprimées',
+  };
+  return <><CompactHeading icon="bookmark" eyebrow="Suivi privé" title={contribution.contribution_id} description="Ce reçu provient du backend FireWarning et reste accessible uniquement avec le jeton conservé dans cette session.">{contribution.fire_id ? <a href={'/incendie/' + contribution.fire_id}>Voir l’incident {contribution.fire_id}</a> : null}</CompactHeading><div className="fw-page fw-standard-page fw-contribution-page"><section className="fw-tracking-card"><header><span className="fw-local-status"><PublicIcon name="clock" size={17} />{stateLabel[contribution.state]}</span><small>{contribution.received_at ? `Reçue le ${new Date(contribution.received_at).toLocaleString('fr-FR')}` : 'Réception en cours'}</small></header><dl className="fw-review-list"><div><dt>Type</dt><dd>{contribution.kind === 'incident_evidence' ? 'Preuve liée à un incident' : 'Nouveau feu à qualifier'}</dd></div><div><dt>Localisation</dt><dd>{contribution.location_label || 'Coordonnées privées enregistrées'}</dd></div><div><dt>Observation</dt><dd>{contribution.observation_type} · {new Date(contribution.observed_at).toLocaleString('fr-FR')}</dd></div><div><dt>Médias reçus</dt><dd>{contribution.media_count}</dd></div><div><dt>Vérification</dt><dd>{contribution.reviewed_at ? new Date(contribution.reviewed_at).toLocaleString('fr-FR') : 'En attente'}</dd></div>{contribution.review_reason ? <div><dt>Décision</dt><dd>{contribution.review_reason}</dd></div> : null}</dl><aside className="fw-flow-notice"><PublicIcon name="info" size={20} /><span>L’autorisation d’analyse privée ne constitue pas une autorisation de republication. Toute diffusion reste soumise aux accords donnés et à une validation humaine.</span></aside><footer className="fw-form-actions"><a className="fw-button fw-button--outline" href={contribution.fire_id ? '/incendie/' + contribution.fire_id : '/incendies'}>Retour</a></footer></section></div></>;
 }

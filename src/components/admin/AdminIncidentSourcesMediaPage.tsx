@@ -15,9 +15,9 @@ function externalHref(value: string | null): string | null {
 }
 
 const ANALYSIS_LABELS: Record<AdminAgentOperationType, { title: string; detail: string }> = {
-  user_media: { title: 'Médias utilisateurs', detail: 'Photos, vidéos et audios transmis avec consentement.' },
-  external_media: { title: 'Presse et médias', detail: 'Images, articles et séquences provenant de sources autorisées.' },
-  satellite_media: { title: 'Satellite et thermique', detail: 'Produits satellite, points chauds et vues thermiques disponibles.' },
+  user_media: { title: 'Analyser les fichiers reçus', detail: 'Photos, vidéos et audios transmis avec consentement.' },
+  source_research: { title: 'Rechercher et analyser les sources publiques', detail: 'Recherche bornée à la coupure de la journée active.' },
+  satellite_media: { title: 'Analyser les images satellites', detail: 'Produits satellite, points chauds et vues thermiques disponibles.' },
 };
 
 function elapsedLabel(value: string | null, now: number): string {
@@ -84,7 +84,8 @@ export function AdminIncidentSourcesMediaPage({ fireId }: { readonly fireId: str
     if (result !== null) { setUpdated(sourceKey); reload(); }
   };
   const runAnalysis = async (type: AdminAgentOperationType) => {
-    const result = await analysisMutation.run(`analysis:${fireId}:${type}`, (options) => api.runIncidentAgentOperation(fireId, type, options));
+    if (operations.kind !== 'ready') return;
+    const result = await analysisMutation.run(`analysis:${fireId}:${operations.data.analysis_window_id}:${type}`, (options) => api.runIncidentAgentOperation(fireId, type, operations.data.analysis_window_id, options));
     if (result !== null) {
       setLaunched({ type, files: result.queued_files });
       reloadOperations();
@@ -101,10 +102,16 @@ export function AdminIncidentSourcesMediaPage({ fireId }: { readonly fireId: str
         <div className="admin-section__heading"><div><h3 id="admin-agent-operations-title">Lancer les analyses</h3><p>Chaque bouton envoie uniquement les lots privés déjà prêts et autorisés. Aucun résultat n’est publié sans validation humaine.</p></div></div>
         {operations.kind === 'loading' ? <AdminLoadingState label="Lecture des analyses disponibles…" /> : null}
         {operations.kind === 'error' ? <AdminErrorState error={operations.error} onRetry={reloadOperations} /> : null}
-        {operations.kind === 'ready' ? <div className="admin-analysis-actions">{operations.data.actions.map((action) => {
-          const label = ANALYSIS_LABELS[action.batch_type];
-          const unavailable = action.blocked_reason === 'dispatch_disabled' ? 'Pod non connecté' : 'Rien à traiter';
-          return <article className="admin-analysis-action" key={action.batch_type}>
+        {operations.kind === 'ready' ? <><p><strong>Journée active :</strong> {new Date(`${operations.data.local_date}T12:00:00`).toLocaleDateString('fr-FR')} · état {operations.data.campaign_day_state ?? 'courant'}</p><div className="admin-analysis-actions">{operations.data.actions.map((action) => {
+          const label = ANALYSIS_LABELS[action.operation_type];
+          const unavailable = action.blocked_reason === 'dispatch_disabled'
+            ? 'Déclenchement désactivé'
+            : action.blocked_reason === 'already_running'
+              ? 'Déjà en cours'
+              : action.blocked_reason === 'research_disabled'
+                ? 'Recherche désactivée'
+                : 'Rien à traiter';
+          return <article className="admin-analysis-action" key={action.operation_type}>
             <div><h4>{label.title}</h4><p>{label.detail}</p></div>
             <dl>
               <div><dt>Fichiers à traiter</dt><dd>{action.pending_files}</dd></div>
@@ -113,10 +120,10 @@ export function AdminIncidentSourcesMediaPage({ fireId }: { readonly fireId: str
             </dl>
             <div className="admin-analysis-action__footer">
               <span>{elapsedLabel(action.last_run_at, now)}</span>
-              <button type="button" className="button button--primary" disabled={analysisMutation.state.pending || !action.can_run} onClick={() => void runAnalysis(action.batch_type)}>{action.can_run ? `Lancer ${label.title.toLowerCase()}` : unavailable}</button>
+              <button type="button" className="button button--primary" disabled={analysisMutation.state.pending || !action.can_run} onClick={() => void runAnalysis(action.operation_type)}>{action.can_run ? label.title : unavailable}</button>
             </div>
           </article>;
-        })}</div> : null}
+        })}</div></> : null}
         <AdminMutationFeedback error={analysisMutation.state.error} succeeded={analysisMutation.state.succeeded} success={launched ? `${launched.files} fichier${launched.files > 1 ? 's' : ''} envoyé${launched.files > 1 ? 's' : ''} pour l’analyse « ${ANALYSIS_LABELS[launched.type].title} ».` : 'Analyse lancée.'} />
       </section>
       <section className="admin-section" aria-labelledby="admin-incident-sources-title">
