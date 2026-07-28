@@ -74,6 +74,18 @@ describe('parseViewerManifest', () => {
     });
   });
 
+  it('accepte un manifeste de scène différée sans exposer les fichiers avant ouverture', () => {
+    const deferred = clonedFixture(availableFixture);
+    deferred.asset = null;
+    deferred.scene = {
+      package_id: 'pkg-deferred',
+      catalog_url: '/api/v1/incident/FR-83-00042/spatial-scene/catalog',
+      files: [],
+    };
+
+    expect(parseViewerManifest(deferred).scene).toEqual(deferred.scene);
+  });
+
   it('applique les invariants des trois états de modèle', () => {
     const available = parseViewerManifest(availableFixture);
     expect(available.model_state).toBe('available');

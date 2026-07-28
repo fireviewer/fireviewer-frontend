@@ -292,11 +292,11 @@ function parseAsset(value: unknown): ViewerManifestAsset | null {
   };
 }
 
-function parseScene(value: unknown): ViewerManifestScene | null {
+export function parseViewerManifestScene(value: unknown): ViewerManifestScene | null {
   if (value === null) return null;
   const record = strictRecord(value, 'scene', ['package_id', 'catalog_url', 'files']);
-  if (!Array.isArray(record.files) || record.files.length === 0 || record.files.length > 2_000) {
-    return fail('scene.files', 'doit contenir entre 1 et 2 000 fichiers.');
+  if (!Array.isArray(record.files) || record.files.length > 2_000) {
+    return fail('scene.files', 'doit contenir au maximum 2 000 fichiers.');
   }
   return {
     package_id: string(record.package_id, 'scene.package_id'),
@@ -427,7 +427,7 @@ export function parseViewerManifest(value: unknown): ViewerManifest {
     status: parseStatus(record.status),
     location: parseLocation(record.location),
     asset: parseAsset(record.asset),
-    scene: parseScene(record.scene),
+    scene: parseViewerManifestScene(record.scene),
     frame: parseFrame(record.frame),
     freshness: parseFreshness(record.freshness),
     model_state: enumValue(record.model_state, 'model_state', MODEL_STATES),

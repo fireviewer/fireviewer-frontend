@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { loadPublicIncidentView, publicIncidentDownloadUrl, type PublicIncidentView } from '../../lib/publicIncidentView';
+import { loadPublicSpatialScene } from '../../lib/publicSpatialScene';
 import { getViewerManifestApiOrigin } from '../../lib/manifestClient';
 import type { ViewerManifestStatusCode, ViewerManifestSummary } from '../../lib/viewerManifest';
 import { IncidentGlbViewer } from './IncidentGlbViewer';
@@ -103,11 +104,31 @@ function IncidentActions({ fireId }: { readonly fireId: string }) {
 function MapPanel({ view, summary, onClose }: { readonly view: PublicIncidentView | null; readonly summary: ViewerManifestSummary; readonly onClose: () => void }) {
   const [lowData, setLowData] = useState(() => localStorage.getItem('firewarning-low-data') === 'true');
   const [open3d, setOpen3d] = useState(false);
+  const [scene, setScene] = useState(() => summary.scene?.files.length ? summary.scene : null);
+  const [sceneLoading, setSceneLoading] = useState(false);
+  const [sceneError, setSceneError] = useState(false);
   const [preset, setPreset] = useState<TiledSceneViewPreset>('near');
   const hasSpatial = summary.modelState === 'available' && Boolean(summary.asset || summary.scene);
-  const tiledSource = useMemo(() => !summary.scene ? null : { catalogUrl: new URL(summary.scene.catalog_url, getViewerManifestApiOrigin() ?? window.location.origin).toString(), files: Object.fromEntries(summary.scene.files.map((file) => [file.path, new URL(file.url, getViewerManifestApiOrigin() ?? window.location.origin).toString()])) }, [summary.scene]);
+  const tiledSource = useMemo(() => !scene ? null : { catalogUrl: new URL(scene.catalog_url, getViewerManifestApiOrigin() ?? window.location.origin).toString(), files: Object.fromEntries(scene.files.map((file) => [file.path, new URL(file.url, getViewerManifestApiOrigin() ?? window.location.origin).toString()])) }, [scene]);
   const setLow = () => setLowData((value) => { localStorage.setItem('firewarning-low-data', String(!value)); return !value; });
-  return <div className="fw-map-panel-backdrop" role="presentation"><aside className="fw-map-panel" role="dialog" aria-modal="true" aria-label="Carte"><header><div><span>Carte</span><h2>{view?.canonical_name ?? `Incident ${summary.fireId}`}</h2></div><button type="button" onClick={onClose} aria-label="Fermer la carte"><PublicIcon name="close" size={22} /></button></header><div className="fw-map-panel__body">{!hasSpatial ? <EmptySection title="Aucune carte publiée" text="Cette fiche peut être consultée sans carte, périmètre ni représentation 3D." icon="map" /> : lowData ? <><div className="fw-map-panel__tools"><button type="button" onClick={setLow}><PublicIcon name="data" size={17} />Activer la vue 3D</button></div><EmptySection title="Vue 3D désactivée" text="Le mode faible connexion laisse la situation et l’évolution accessibles." icon="data" /></> : !open3d ? <><div className="fw-map-panel__tools"><button type="button" onClick={setLow}><PublicIcon name="data" size={17} />Faible connexion</button></div><section className="fw-viewer-fallback"><PublicIcon name="map" size={30} /><h2>Vue 3D à la demande</h2><p>Le catalogue et les tuiles ne seront chargés qu’après votre action.</p><button className="fw-button fw-button--primary" type="button" onClick={() => setOpen3d(true)}>Ouvrir la vue 3D <PublicIcon name="arrow" size={16} /></button></section></> : <div className="fw-incident-viewer"><div className="fw-viewer-distance" aria-label="Distance de la représentation">{([['near', 'Zone proche'], ['local', 'Secteur local'], ['extended', 'Vue étendue']] as const).map(([id, label]) => <button key={id} className={preset === id ? 'is-active' : undefined} type="button" onClick={() => setPreset(id)}>{label}</button>)}</div>{tiledSource ? <Suspense fallback={<div className="incident-tiled-scene__loading" role="status">Préparation de la vue 3D…</div>}><TiledSpatialScene3D source={tiledSource} overlayOriginWgs84={summary.frame?.origin_wgs84} viewPreset={preset} /></Suspense> : summary.asset ? <IncidentGlbViewer assetUrl={summary.asset.url} version={summary.asset.version} sha256={summary.asset.sha256} frame={summary.frame} terrainSourceYear={summary.freshness.terrain_source_year} observations={view?.observations ?? []} /> : null}</div>}</div></aside></div>;
+  const openSpatialView = async () => {
+    if (summary.asset || scene) {
+      setOpen3d(true);
+      return;
+    }
+    if (!summary.scene) return;
+    setSceneLoading(true);
+    setSceneError(false);
+    try {
+      setScene(await loadPublicSpatialScene(summary.fireId));
+      setOpen3d(true);
+    } catch {
+      setSceneError(true);
+    } finally {
+      setSceneLoading(false);
+    }
+  };
+  return <div className="fw-map-panel-backdrop" role="presentation"><aside className="fw-map-panel" role="dialog" aria-modal="true" aria-label="Carte"><header><div><span>Carte</span><h2>{view?.canonical_name ?? `Incident ${summary.fireId}`}</h2></div><button type="button" onClick={onClose} aria-label="Fermer la carte"><PublicIcon name="close" size={22} /></button></header><div className="fw-map-panel__body">{!hasSpatial ? <EmptySection title="Aucune carte publiée" text="Cette fiche peut être consultée sans carte, périmètre ni représentation 3D." icon="map" /> : lowData ? <><div className="fw-map-panel__tools"><button type="button" onClick={setLow}><PublicIcon name="data" size={17} />Activer la vue 3D</button></div><EmptySection title="Vue 3D désactivée" text="Le mode faible connexion laisse la situation et l’évolution accessibles." icon="data" /></> : !open3d ? <><div className="fw-map-panel__tools"><button type="button" onClick={setLow}><PublicIcon name="data" size={17} />Faible connexion</button></div><section className="fw-viewer-fallback"><PublicIcon name="map" size={30} /><h2>Vue 3D à la demande</h2><p>Le catalogue et les tuiles ne seront chargés qu’après votre action.</p>{sceneError ? <p role="alert">La scène 3D n’a pas pu être préparée.</p> : null}<button className="fw-button fw-button--primary" type="button" disabled={sceneLoading} onClick={() => void openSpatialView()}>{sceneLoading ? 'Préparation de la vue 3D…' : 'Ouvrir la vue 3D'} {!sceneLoading ? <PublicIcon name="arrow" size={16} /> : null}</button></section></> : <div className="fw-incident-viewer"><div className="fw-viewer-distance" aria-label="Distance de la représentation">{([['near', 'Zone proche'], ['local', 'Secteur local'], ['extended', 'Vue étendue']] as const).map(([id, label]) => <button key={id} className={preset === id ? 'is-active' : undefined} type="button" onClick={() => setPreset(id)}>{label}</button>)}</div>{tiledSource ? <Suspense fallback={<div className="incident-tiled-scene__loading" role="status">Préparation de la vue 3D…</div>}><TiledSpatialScene3D source={tiledSource} overlayOriginWgs84={summary.frame?.origin_wgs84} viewPreset={preset} /></Suspense> : summary.asset ? <IncidentGlbViewer assetUrl={summary.asset.url} version={summary.asset.version} sha256={summary.asset.sha256} frame={summary.frame} terrainSourceYear={summary.freshness.terrain_source_year} observations={view?.observations ?? []} /> : null}</div>}</div></aside></div>;
 }
 
 export function PublicIncidentRealPage({ summary, checkedAt: _checkedAt, stale, refreshing, onRefresh, detailRequest, emptyPreview = false, demoLabel }: { readonly summary: ViewerManifestSummary; readonly checkedAt: string; readonly stale: boolean; readonly refreshing: boolean; readonly onRefresh: () => void; readonly detailRequest?: Promise<{ readonly view: PublicIncidentView | null; readonly error: unknown | null }>; readonly emptyPreview?: boolean; readonly demoLabel?: string }) {
