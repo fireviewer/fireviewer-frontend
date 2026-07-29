@@ -174,12 +174,17 @@ export async function uploadIncidentDailySatellitePackage(options: {
   }
 
   const progress = new Map(files.map((file) => [file.name, 0]));
+  const uploadedFilenames = new Set(opened.already_uploaded_filenames);
+  for (const file of files) {
+    if (uploadedFilenames.has(file.name)) progress.set(file.name, 100);
+  }
   const reportProgress = () => {
     const total = [...progress.values()].reduce((sum, value) => sum + value, 0);
     options.onProgress?.(Math.round(total / files.length));
   };
+  reportProgress();
   const uploader = options.uploader ?? defaultUploader;
-  await Promise.all(files.map(async (file) => {
+  await Promise.all(files.filter((file) => !uploadedFilenames.has(file.name)).map(async (file) => {
     const pathname = `${opened.pathname_prefix}/${file.name}`;
     const stored = await uploader(pathname, file, {
       access: 'private',

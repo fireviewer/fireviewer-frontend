@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AdminAgentOperationType, AdminIncidentSourcesMediaWorkspace } from '../../lib/adminApi';
 import { uploadIncidentDailySatellitePackage } from '../../lib/dailySatelliteUpload';
+import { uploadIncidentSourcePackage } from '../../lib/incidentSourceUpload';
 import { useAdminApi, useAdminMutation, useAdminQuery } from './AdminApiContext';
 import { AdminEmptyState, AdminErrorState, AdminLoadingState, AdminMutationFeedback, AdminPageHeader, AdminStateLabel, formatAdminDate } from './AdminPageState';
 import { AdminIncidentWorkspaceNav } from './AdminIncidentWorkspaceNav';
@@ -73,10 +74,18 @@ export function AdminIncidentSourcesMediaPage({ fireId }: { readonly fireId: str
   const { state: operations, reload: reloadOperations } = useAdminQuery(loadOperations, [loadOperations]);
   const mutation = useAdminMutation();
   const analysisMutation = useAdminMutation();
+  const sourceUploadMutation = useAdminMutation();
   const satelliteUploadMutation = useAdminMutation();
   const clearSatelliteUploadMutation = satelliteUploadMutation.clear;
   const [updated, setUpdated] = useState<string | null>(null);
   const [launched, setLaunched] = useState<{ type: AdminAgentOperationType; files: number } | null>(null);
+  const sourceInputRef = useRef<HTMLInputElement>(null);
+  const [sourceFiles, setSourceFiles] = useState<readonly File[]>([]);
+  const [sourceProgress, setSourceProgress] = useState(0);
+  const [sourceUploadResult, setSourceUploadResult] = useState<Awaited<
+    ReturnType<typeof uploadIncidentSourcePackage>
+  > | null>(null);
+  const satelliteInputRef = useRef<HTMLInputElement>(null);
   const [satelliteFiles, setSatelliteFiles] = useState<readonly File[]>([]);
   const [satelliteProgress, setSatelliteProgress] = useState(0);
   const [satelliteUploadResult, setSatelliteUploadResult] = useState<{
@@ -102,6 +111,7 @@ export function AdminIncidentSourcesMediaPage({ fireId }: { readonly fireId: str
     setSatelliteFiles([]);
     setSatelliteProgress(0);
     setSatelliteUploadResult(null);
+    if (satelliteInputRef.current) satelliteInputRef.current.value = '';
     clearSatelliteUploadMutation();
   }, [clearSatelliteUploadMutation, selectedWindow?.analysis_window_id]);
   const updateSource = async (sourceKey: string, input: Parameters<typeof api.updateSource>[1]) => {
@@ -113,6 +123,32 @@ export function AdminIncidentSourcesMediaPage({ fireId }: { readonly fireId: str
     const result = await analysisMutation.run(`analysis:${fireId}:${selectedWindow.analysis_window_id}:${type}`, (options) => api.runIncidentAgentOperation(fireId, type, selectedWindow.analysis_window_id, options));
     if (result !== null) {
       setLaunched({ type, files: result.queued_files });
+      reloadOperations();
+    }
+  };
+  const uploadIncidentSources = async () => {
+    if (sourceFiles.length === 0) return;
+    setSourceProgress(0);
+    setSourceUploadResult(null);
+    const fingerprint = sourceFiles
+      .map((file) => `${file.name}:${file.size}:${file.lastModified}`)
+      .sort()
+      .join('|');
+    const result = await sourceUploadMutation.run(
+      `incident-sources:${fireId}:${fingerprint}`,
+      (options) => uploadIncidentSourcePackage({
+        api,
+        fireId,
+        files: sourceFiles,
+        requestOptions: options,
+        onProgress: setSourceProgress,
+      }),
+    );
+    if (result !== null) {
+      setSourceUploadResult(result);
+      setSourceFiles([]);
+      setSourceProgress(100);
+      if (sourceInputRef.current) sourceInputRef.current.value = '';
       reloadOperations();
     }
   };
@@ -142,6 +178,7 @@ export function AdminIncidentSourcesMediaPage({ fireId }: { readonly fireId: str
       });
       setSatelliteFiles([]);
       setSatelliteProgress(100);
+      if (satelliteInputRef.current) satelliteInputRef.current.value = '';
       reloadOperations();
     }
   };
@@ -152,12 +189,74 @@ export function AdminIncidentSourcesMediaPage({ fireId }: { readonly fireId: str
     <section aria-labelledby="admin-incident-sources-title">
       <AdminPageHeader title="Sources et médias"><p>Registre des sources utilisées par <code>{fireId}</code> et inventaire de preuves. Aucun média brut, contributeur, trace ou fichier privé n’est rendu dans cette surface.</p></AdminPageHeader>
       <AdminIncidentWorkspaceNav fireId={fireId} active="sources-media" />
+      <section className="admin-section" aria-labelledby="admin-incident-source-upload-title">
+        <div className="admin-section__heading">
+          <div>
+            <h3 id="admin-incident-source-upload-title">Ajouter les sources de l’incident</h3>
+            <p>Déposez en une fois les photos, vidéos, audios et textes reçus pour l’incident. Le classement par date et par fenêtre est réalisé après réception, sans choisir une journée ici.</p>
+          </div>
+        </div>
+        <article className="admin-analysis-action">
+          <label className="admin-field">
+            <span>Fichiers sources</span>
+            <input
+              ref={sourceInputRef}
+              type="file"
+              multiple
+              accept=".jpg,.jpeg,.png,.webp,.mp4,.mov,.webm,.mp3,.m4a,.wav,.ogg,.txt,.md,.html,.htm,image/jpeg,image/png,image/webp,video/mp4,video/quicktime,video/webm,audio/mpeg,audio/mp4,audio/wav,audio/ogg,text/plain,text/markdown,text/html"
+              disabled={sourceUploadMutation.state.pending}
+              onChange={(event) => {
+                setSourceFiles(Array.from(event.currentTarget.files ?? []));
+                setSourceProgress(0);
+                setSourceUploadResult(null);
+                sourceUploadMutation.clear();
+              }}
+            />
+            <small>Les métadonnées et éléments temporels disponibles servent au classement. Un fichier non datable reste à classer et n’est pas forcé dans une journée. Utilisez des noms de fichiers simples, sans espace ni accent.</small>
+          </label>
+          <div className="admin-analysis-action__footer">
+            <span>{sourceFiles.length ? `${sourceFiles.length} fichier${sourceFiles.length > 1 ? 's' : ''} sélectionné${sourceFiles.length > 1 ? 's' : ''}${sourceUploadMutation.state.pending ? ` · ${sourceProgress} %` : ''}` : 'Aucun fichier sélectionné'}</span>
+            <button type="button" className="button button--primary" disabled={sourceUploadMutation.state.pending || sourceFiles.length === 0} onClick={() => void uploadIncidentSources()}>
+              {sourceUploadMutation.state.pending ? 'Envoi privé en cours…' : 'Envoyer et classer les sources'}
+            </button>
+          </div>
+        </article>
+        <AdminMutationFeedback
+          error={sourceUploadMutation.state.error}
+          succeeded={sourceUploadMutation.state.succeeded}
+          success={sourceUploadResult
+            ? `Reçu ${sourceUploadResult.package_id} · ${sourceUploadResult.item_count} fichier${sourceUploadResult.item_count > 1 ? 's' : ''} conservé${sourceUploadResult.item_count > 1 ? 's' : ''} en privé.`
+            : 'Sources reçues et conservées en privé.'}
+        />
+        {sourceUploadResult ? <article className="admin-source-record" aria-label={`Reçu ${sourceUploadResult.package_id}`}>
+          <header>
+            <div>
+              <h3>Classement du dépôt</h3>
+              <p><code>{sourceUploadResult.package_id}</code> · aucune autorisation de publication</p>
+            </div>
+            <AdminStateLabel value={sourceUploadResult.state} />
+          </header>
+          <dl>
+            <div><dt>Fichiers reçus</dt><dd>{sourceUploadResult.item_count}</dd></div>
+            <div><dt>Fichiers classés</dt><dd>{sourceUploadResult.classified_item_count ?? 'Calcul en cours'}</dd></div>
+            <div><dt>À classer</dt><dd>{sourceUploadResult.to_classify_item_count ?? 'Calcul en cours'}</dd></div>
+            <div><dt>Fenêtres quotidiennes</dt><dd>{sourceUploadResult.analysis_window_count ?? 'Calcul en cours'}</dd></div>
+          </dl>
+          {sourceUploadResult.date_groups.length ? <ul>
+            {sourceUploadResult.date_groups.map((group) => <li key={group.analysis_window_id}>
+              <strong>{new Date(`${group.local_date}T12:00:00`).toLocaleDateString('fr-FR')}</strong>
+              {' · '}
+              {group.item_count} fichier{group.item_count > 1 ? 's' : ''}
+            </li>)}
+          </ul> : <p>Aucun groupe daté n’a encore été retourné.</p>}
+        </article> : null}
+      </section>
       <section className="admin-section" aria-labelledby="admin-agent-operations-title">
         <div className="admin-section__heading"><div><h3 id="admin-agent-operations-title">Lancer les analyses</h3><p>Chaque bouton envoie uniquement les lots privés déjà prêts et autorisés. Aucun résultat n’est publié sans validation humaine.</p></div></div>
         {operations.kind === 'loading' ? <AdminLoadingState label="Lecture des analyses disponibles…" /> : null}
         {operations.kind === 'error' ? <AdminErrorState error={operations.error} onRetry={reloadOperations} /> : null}
         {operations.kind === 'ready' && selectedWindow ? <><p><strong>Fenêtre préparée :</strong> {new Date(`${selectedWindow.local_date}T12:00:00`).toLocaleDateString('fr-FR')} · état {selectedWindow.campaign_day_state ?? 'courant'}</p>
-          {availableWindows.length > 1 ? <label className="admin-field"><span>Fenêtre de la campagne</span><select value={selectedWindow.analysis_window_id} onChange={(event) => setSelectedAnalysisWindowId(event.currentTarget.value)} disabled={analysisMutation.state.pending || satelliteUploadMutation.state.pending}>{availableWindows.map((window) => <option key={window.analysis_window_id} value={window.analysis_window_id}>{new Date(`${window.local_date}T12:00:00`).toLocaleDateString('fr-FR')} · {window.campaign_day_state ?? 'courant'}</option>)}</select><small>La liste provient du manifeste préparé ; aucune date n’est saisie ici.</small></label> : null}
+          {availableWindows.length > 1 ? <label className="admin-field"><span>Fenêtre à analyser</span><select value={selectedWindow.analysis_window_id} onChange={(event) => setSelectedAnalysisWindowId(event.currentTarget.value)} disabled={analysisMutation.state.pending || satelliteUploadMutation.state.pending}>{availableWindows.map((window) => <option key={window.analysis_window_id} value={window.analysis_window_id}>{new Date(`${window.local_date}T12:00:00`).toLocaleDateString('fr-FR')} · {window.campaign_day_state ?? 'courant'}</option>)}</select><small>Ces fenêtres ont été produites par le classement des sources ; elles servent uniquement à lancer et relire chaque inférence quotidienne.</small></label> : null}
           {selectedWindow.actions.some((action) => action.operation_type === 'satellite_media' && action.schedule_state === 'required') ? <article className="admin-analysis-action" aria-labelledby="admin-daily-satellite-upload-title">
             <div>
               <h4 id="admin-daily-satellite-upload-title">Ajouter les produits de la journée</h4>
@@ -166,9 +265,10 @@ export function AdminIncidentSourcesMediaPage({ fireId }: { readonly fireId: str
             <label className="admin-field">
               <span>Fichiers du lot quotidien</span>
               <input
+                ref={satelliteInputRef}
                 type="file"
                 multiple
-                accept=".json,.geojson,.png,.jpg,.jpeg,.tif,.tiff,application/json,image/png,image/jpeg,image/tiff"
+                accept=".json,.geojson,.png,.jpg,.jpeg,.tif,.tiff,application/json,application/geo+json,image/png,image/jpeg,image/tiff"
                 disabled={satelliteUploadMutation.state.pending}
                 onChange={(event) => {
                   setSatelliteFiles(Array.from(event.currentTarget.files ?? []));

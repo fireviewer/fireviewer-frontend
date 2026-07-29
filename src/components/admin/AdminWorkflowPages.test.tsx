@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import '@testing-library/jest-dom/vitest';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AdminApiProvider } from './AdminApiContext';
@@ -12,10 +12,21 @@ import { AdminNewIncidentPage } from './AdminNewIncidentPage';
 import { AdminSpatialMatchingPage } from './AdminSpatialMatchingPage';
 import { AdminZonePrivatePreviewPage } from './AdminZonePrivatePreviewPage';
 
+const uploadIncidentSourcePackageMock = vi.hoisted(() => vi.fn());
+const uploadIncidentDailySatellitePackageMock = vi.hoisted(() => vi.fn());
+
 vi.mock('../public/TiledSpatialScene3D', () => ({
   TiledSpatialScene3D: ({ cameraMode, source }: { readonly cameraMode: string; readonly source: { readonly credentials?: string } }) => (
     <div>Scène Unity {cameraMode} · accès {source.credentials}</div>
   ),
+}));
+
+vi.mock('../../lib/incidentSourceUpload', () => ({
+  uploadIncidentSourcePackage: uploadIncidentSourcePackageMock,
+}));
+
+vi.mock('../../lib/dailySatelliteUpload', () => ({
+  uploadIncidentDailySatellitePackage: uploadIncidentDailySatellitePackageMock,
 }));
 
 const API_ORIGIN = 'http://localhost:8000';
@@ -62,6 +73,8 @@ function renderAdmin(node: React.ReactNode) {
 describe('pages de workflow administrateur', () => {
   afterEach(() => {
     cleanup();
+    uploadIncidentSourcePackageMock.mockReset();
+    uploadIncidentDailySatellitePackageMock.mockReset();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
@@ -265,8 +278,44 @@ describe('pages de workflow administrateur', () => {
     expect(screen.queryByLabelText('Fichiers du lot quotidien')).not.toBeInTheDocument();
   });
 
-  it('sélectionne une fenêtre préparée sans saisie de date pour les produits satellite', async () => {
+  it('dépose toutes les sources sans choisir de date puis affiche le classement quotidien', async () => {
     vi.stubEnv('VITE_API_BASE_URL', API_ORIGIN);
+    uploadIncidentSourcePackageMock.mockResolvedValue({
+      package_id: 'SP-fontainebleau-mixed',
+      package_kind: 'ADMIN_SOURCES',
+      fire_id: 'FR-77-00001',
+      episode_id: 'E01',
+      state: 'CONVERTED',
+      known_start_date: null,
+      known_end_date: null,
+      analysis_authorized: true,
+      publication_authorized: false,
+      purge_after: '2026-08-29T10:00:00Z',
+      finalized_at: '2026-07-29T10:00:00Z',
+      batch_ids: ['batch-20260712', 'batch-20260713'],
+      item_count: 3,
+      classified_item_count: 2,
+      to_classify_item_count: 1,
+      analysis_window_count: 2,
+      date_groups: [
+        {
+          local_date: '2026-07-12',
+          analysis_window_id: 'window-20260712',
+          item_count: 1,
+          batch_ids: ['batch-20260712'],
+        },
+        {
+          local_date: '2026-07-13',
+          analysis_window_id: 'window-20260713',
+          item_count: 2,
+          batch_ids: ['batch-20260713'],
+        },
+      ],
+    });
+    uploadIncidentDailySatellitePackageMock.mockResolvedValue({
+      item_count: 2,
+      batch_ids: ['batch-satellite-20260713'],
+    });
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input) => {
       if (String(input).includes('/api/v2/admin/agent-batches/')) return response({
         fire_id: 'FR-77-00001',
@@ -308,12 +357,54 @@ describe('pages de workflow administrateur', () => {
     const user = userEvent.setup();
     renderAdmin(<AdminIncidentSourcesMediaPage fireId="FR-77-00001" />);
 
-    expect(await screen.findByRole('heading', { name: 'Ajouter les produits de la journée' })).toBeInTheDocument();
-    expect(screen.getByLabelText('Fichiers du lot quotidien')).toHaveAttribute('multiple');
+    expect(await screen.findByRole('heading', { name: 'Ajouter les sources de l’incident' })).toBeInTheDocument();
+    const sourceInput = screen.getByLabelText(/Fichiers sources/);
+    expect(sourceInput).toHaveAttribute('multiple');
+    expect(sourceInput).not.toHaveAttribute('accept', expect.stringMatching(/json|tif/i));
     expect(screen.queryByRole('textbox', { name: /date/i })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Ajouter à cette fenêtre' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Envoyer et classer les sources' })).toBeDisabled();
+    const files = [
+      new File(['photo'], 'terrain.jpg', { type: 'image/jpeg' }),
+      new File(['video'], 'survol.mp4', { type: 'video/mp4' }),
+      new File(['texte'], 'communique.txt', { type: 'text/plain' }),
+    ];
+    await user.upload(sourceInput, files);
+    await user.click(screen.getByRole('button', { name: 'Envoyer et classer les sources' }));
+
+    expect(await screen.findByRole('heading', { name: 'Classement du dépôt' })).toBeVisible();
+    const receipt = screen.getByLabelText('Reçu SP-fontainebleau-mixed');
+    expect(within(receipt).getByText('SP-fontainebleau-mixed')).toBeVisible();
+    expect(within(receipt).getByText('12/07/2026')).toBeVisible();
+    expect(within(receipt).getByText('13/07/2026')).toBeVisible();
+    expect(within(within(receipt).getByText('Fichiers reçus').parentElement!).getByText('3')).toBeVisible();
+    expect(within(within(receipt).getByText('Fichiers classés').parentElement!).getByText('2')).toBeVisible();
+    expect(within(within(receipt).getByText('À classer').parentElement!).getByText('1')).toBeVisible();
+    expect((sourceInput as HTMLInputElement).files).toHaveLength(0);
+    expect(uploadIncidentSourcePackageMock).toHaveBeenCalledWith(expect.objectContaining({
+      fireId: 'FR-77-00001',
+      files,
+    }));
+    expect(uploadIncidentSourcePackageMock.mock.calls[0]?.[0]).not.toHaveProperty('expectedAnalysisWindowId');
+
     await user.selectOptions(screen.getByRole('combobox'), 'window-20260713');
-    expect(screen.getByText((_, element) => element?.tagName === 'P' && element.textContent?.includes('Fenêtre préparée : 13/07/2026') === true)).toBeInTheDocument();
+    const satelliteInput = screen.getByLabelText('Fichiers du lot quotidien');
+    expect(satelliteInput).toHaveAttribute('accept', expect.stringMatching(/json/));
+    expect(satelliteInput).toHaveAttribute('accept', expect.stringMatching(/tif/));
+    const manifest = new File(['{}'], 'fireviewer-satellite-manifest.json', {
+      type: 'application/json',
+    });
+    const satellite = new File(['satellite'], 'sentinel-six-band.tif', {
+      type: 'image/tiff',
+    });
+    await user.upload(satelliteInput, [manifest, satellite]);
+    await user.click(screen.getByRole('button', { name: 'Ajouter à cette fenêtre' }));
+
+    expect(uploadIncidentDailySatellitePackageMock).toHaveBeenCalledWith(expect.objectContaining({
+      fireId: 'FR-77-00001',
+      expectedAnalysisWindowId: 'window-20260713',
+      files: [manifest, satellite],
+    }));
+    expect((satelliteInput as HTMLInputElement).files).toHaveLength(0);
   });
 
   it('publie depuis l’aperçu avec la session administrateur active', async () => {

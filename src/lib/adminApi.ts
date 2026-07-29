@@ -159,7 +159,7 @@ export interface AdminAgentOperationRunResponse {
   readonly episode_id: string;
   readonly analysis_window_id: string;
   readonly operation_type: AdminAgentOperationType;
-  readonly queued_batch_ids: readonly string[];
+  readonly operation_ids: readonly string[];
   readonly queued_files: number;
 }
 
@@ -491,6 +491,7 @@ export interface AdminBlobUploadGrant {
 
 export interface AdminDailySatellitePackageOpen extends AdminBlobUploadGrant {
   readonly package_id: string;
+  readonly already_uploaded_filenames: readonly string[];
 }
 
 export interface AdminDailySatellitePackageResult {
@@ -507,6 +508,37 @@ export interface AdminDailySatellitePackageResult {
   readonly finalized_at: string;
   readonly batch_ids: readonly string[];
   readonly item_count: number;
+  readonly classified_item_count: number | null;
+  readonly to_classify_item_count: number | null;
+  readonly analysis_window_count: number | null;
+  readonly date_groups: readonly AdminIncidentSourceDateGroup[];
+}
+
+export interface AdminIncidentSourceDateGroup {
+  readonly local_date: string;
+  readonly analysis_window_id: string;
+  readonly item_count: number;
+  readonly batch_ids: readonly string[];
+}
+
+export interface AdminIncidentSourcePackageResult {
+  readonly package_id: string;
+  readonly package_kind: 'ADMIN_SOURCES' | 'USER_SOURCES';
+  readonly fire_id: string;
+  readonly episode_id: string;
+  readonly state: 'CONVERTED';
+  readonly known_start_date: string | null;
+  readonly known_end_date: string | null;
+  readonly analysis_authorized: true;
+  readonly publication_authorized: false;
+  readonly purge_after: string;
+  readonly finalized_at: string;
+  readonly batch_ids: readonly string[];
+  readonly item_count: number;
+  readonly classified_item_count: number | null;
+  readonly to_classify_item_count: number | null;
+  readonly analysis_window_count: number | null;
+  readonly date_groups: readonly AdminIncidentSourceDateGroup[];
 }
 
 export interface AdminBlobObjectReference {
@@ -933,11 +965,27 @@ function parseIncidentGalleryItem(value: unknown): AdminIncidentGalleryItem {
 }
 
 function parseDailySatellitePackageOpen(value: unknown): AdminDailySatellitePackageOpen {
-  if (!isRecord(value) || !hasExactKeys(value, ['package_id', 'upload_id', 'pathname_prefix', 'upload_grant', 'expires_at', 'maximum_file_size_bytes', 'allowed_content_types'])) {
+  const baseKeys = ['package_id', 'upload_id', 'pathname_prefix', 'upload_grant', 'expires_at', 'maximum_file_size_bytes', 'allowed_content_types'];
+  if (
+    !isRecord(value)
+    || (
+      !hasExactKeys(value, baseKeys)
+      && !hasExactKeys(value, [...baseKeys, 'already_uploaded_filenames'])
+    )
+    || (
+      value.already_uploaded_filenames !== undefined
+      && !Array.isArray(value.already_uploaded_filenames)
+    )
+  ) {
     throw new Error('Autorisation d’envoi des produits quotidiens invalide.');
   }
   return {
     package_id: readString(value.package_id, 'package_id', { max: 128 })!,
+    already_uploaded_filenames: (value.already_uploaded_filenames ?? []).map((filename) => readString(
+      filename,
+      'already_uploaded_filenames',
+      { max: 500 },
+    )!),
     ...parseBlobUploadGrant({
       upload_id: value.upload_id,
       pathname_prefix: value.pathname_prefix,
@@ -950,11 +998,17 @@ function parseDailySatellitePackageOpen(value: unknown): AdminDailySatellitePack
 }
 
 function parseDailySatellitePackageResult(value: unknown): AdminDailySatellitePackageResult {
+  const baseKeys = ['package_id', 'package_kind', 'fire_id', 'episode_id', 'state', 'known_start_date', 'known_end_date', 'location_hint', 'analysis_authorized', 'publication_authorized', 'purge_after', 'finalized_at', 'batch_ids', 'items'];
+  const classificationKeys = ['classified_item_count', 'to_classify_item_count', 'analysis_window_count', 'date_groups'];
   if (
     !isRecord(value)
-    || !hasExactKeys(value, ['package_id', 'package_kind', 'fire_id', 'episode_id', 'state', 'known_start_date', 'known_end_date', 'location_hint', 'analysis_authorized', 'publication_authorized', 'purge_after', 'finalized_at', 'batch_ids', 'items'])
+    || (
+      !hasExactKeys(value, baseKeys)
+      && !hasExactKeys(value, [...baseKeys, ...classificationKeys])
+    )
     || !Array.isArray(value.batch_ids)
     || !Array.isArray(value.items)
+    || (value.date_groups !== undefined && !Array.isArray(value.date_groups))
   ) {
     throw new Error('Résultat d’envoi des produits quotidiens invalide.');
   }
@@ -966,6 +1020,30 @@ function parseDailySatellitePackageResult(value: unknown): AdminDailySatellitePa
   if (!analysisAuthorized || publicationAuthorized) {
     throw new Error('Le lot quotidien ne respecte pas le contrat privé.');
   }
+  const nullableCount = (
+    field: 'classified_item_count' | 'to_classify_item_count' | 'analysis_window_count',
+  ) => value[field] === undefined
+    ? null
+    : readNonNegativeInteger(value[field], field);
+  const dateGroups = (value.date_groups ?? []).map((item, index) => {
+    if (!isRecord(item) || !Array.isArray(item.batch_ids)) {
+      throw new Error(`Groupe de dates ${index + 1} invalide.`);
+    }
+    return {
+      local_date: readIsoDate(item.local_date, 'date_groups.local_date').slice(0, 10),
+      analysis_window_id: readString(
+        item.analysis_window_id,
+        'date_groups.analysis_window_id',
+        { max: 128 },
+      )!,
+      item_count: readNonNegativeInteger(item.item_count, 'date_groups.item_count'),
+      batch_ids: item.batch_ids.map((batchId) => readString(
+        batchId,
+        'date_groups.batch_id',
+        { max: 128 },
+      )!),
+    };
+  });
   return {
     package_id: readString(value.package_id, 'package_id', { max: 128 })!,
     package_kind: readEnum(value.package_kind, 'package_kind', ['ADMIN_SATELLITE'] as const),
@@ -980,6 +1058,80 @@ function parseDailySatellitePackageResult(value: unknown): AdminDailySatellitePa
     finalized_at: readIsoDate(value.finalized_at, 'finalized_at'),
     batch_ids: value.batch_ids.map((item) => readString(item, 'batch_id', { max: 128 })!),
     item_count: value.items.length,
+    classified_item_count: nullableCount('classified_item_count'),
+    to_classify_item_count: nullableCount('to_classify_item_count'),
+    analysis_window_count: nullableCount('analysis_window_count'),
+    date_groups: dateGroups,
+  };
+}
+
+function parseIncidentSourcePackageResult(value: unknown): AdminIncidentSourcePackageResult {
+  if (
+    !isRecord(value)
+    || !Array.isArray(value.batch_ids)
+    || !Array.isArray(value.items)
+    || (value.date_groups !== undefined && !Array.isArray(value.date_groups))
+  ) {
+    throw new Error('Résultat du dépôt de sources incident invalide.');
+  }
+  const analysisAuthorized = readBoolean(value.analysis_authorized, 'analysis_authorized');
+  const publicationAuthorized = readBoolean(
+    value.publication_authorized,
+    'publication_authorized',
+  );
+  if (!analysisAuthorized || publicationAuthorized) {
+    throw new Error('Le dépôt de sources ne respecte pas le contrat privé.');
+  }
+  const nullableDate = (field: 'known_start_date' | 'known_end_date') => {
+    if (value[field] === null || value[field] === undefined) return null;
+    return readIsoDate(value[field], field).slice(0, 10);
+  };
+  const nullableCount = (
+    field: 'classified_item_count' | 'to_classify_item_count' | 'analysis_window_count',
+  ) => value[field] === undefined
+    ? null
+    : readNonNegativeInteger(value[field], field);
+  const dateGroups = (value.date_groups ?? []).map((item, index) => {
+    if (!isRecord(item) || !Array.isArray(item.batch_ids)) {
+      throw new Error(`Groupe de dates ${index + 1} invalide.`);
+    }
+    return {
+      local_date: readIsoDate(item.local_date, 'date_groups.local_date').slice(0, 10),
+      analysis_window_id: readString(
+        item.analysis_window_id,
+        'date_groups.analysis_window_id',
+        { max: 128 },
+      )!,
+      item_count: readNonNegativeInteger(item.item_count, 'date_groups.item_count'),
+      batch_ids: item.batch_ids.map((batchId) => readString(
+        batchId,
+        'date_groups.batch_id',
+        { max: 128 },
+      )!),
+    };
+  });
+  return {
+    package_id: readString(value.package_id, 'package_id', { max: 128 })!,
+    package_kind: readEnum(
+      value.package_kind,
+      'package_kind',
+      ['ADMIN_SOURCES', 'USER_SOURCES'] as const,
+    ),
+    fire_id: readString(value.fire_id, 'fire_id', { max: 32 })!,
+    episode_id: readString(value.episode_id, 'episode_id', { max: 128 })!,
+    state: readEnum(value.state, 'state', ['CONVERTED'] as const),
+    known_start_date: nullableDate('known_start_date'),
+    known_end_date: nullableDate('known_end_date'),
+    analysis_authorized: analysisAuthorized,
+    publication_authorized: publicationAuthorized,
+    purge_after: readIsoDate(value.purge_after, 'purge_after'),
+    finalized_at: readIsoDate(value.finalized_at, 'finalized_at'),
+    batch_ids: value.batch_ids.map((item) => readString(item, 'batch_id', { max: 128 })!),
+    item_count: value.items.length,
+    classified_item_count: nullableCount('classified_item_count'),
+    to_classify_item_count: nullableCount('to_classify_item_count'),
+    analysis_window_count: nullableCount('analysis_window_count'),
+    date_groups: dateGroups,
   };
 }
 
@@ -2175,19 +2327,68 @@ export class AdminApiClient {
       throw new AdminApiError('configuration', 'Commande d’analyse IA invalide.');
     }
     const payload = await this.postJsonV2(`/agent-batches/incidents/${encodeURIComponent(fireId)}/operations/${operationType}/run`, { expected_analysis_window_id: expectedAnalysisWindowId }, options);
-    if (!isRecord(payload) || !Array.isArray(payload.queued_batch_ids)) throw new AdminApiError('parse', 'Le lancement de l’analyse IA est invalide.');
+    if (!isRecord(payload) || !Array.isArray(payload.operation_ids)) throw new AdminApiError('parse', 'Le lancement de l’analyse IA est invalide.');
     try {
       return {
         fire_id: readString(payload.fire_id, 'fire_id', { max: 32 })!,
         episode_id: readString(payload.episode_id, 'episode_id', { max: 128 })!,
         analysis_window_id: readString(payload.analysis_window_id, 'analysis_window_id', { max: 128 })!,
         operation_type: readEnum(payload.operation_type, 'operation_type', ['user_media', 'source_research', 'satellite_media'] as const),
-        queued_batch_ids: payload.queued_batch_ids.map((item) => readString(item, 'queued_batch_id', { max: 128 })!),
+        operation_ids: payload.operation_ids.map((item) => readString(item, 'operation_id', { max: 128 })!),
         queued_files: readNonNegativeInteger(payload.queued_files, 'queued_files'),
       };
     } catch {
       throw new AdminApiError('parse', 'Le lancement de l’analyse IA est invalide.');
     }
+  }
+
+  async openIncidentSourcePackage(
+    fireId: string,
+    fileCount: number,
+    totalSizeBytes: number,
+    options: AdminRequestOptions,
+  ): Promise<AdminDailySatellitePackageOpen> {
+    if (
+      !/^FR-[0-9A-Z]{2,3}-[0-9]{5}$/.test(fireId)
+      || !Number.isSafeInteger(fileCount)
+      || fileCount < 1
+      || !Number.isSafeInteger(totalSizeBytes)
+      || totalSizeBytes < 1
+    ) {
+      throw new AdminApiError('configuration', 'Le dépôt de sources incident est invalide.');
+    }
+    const payload = await this.postJsonV2(
+      `/agent-batches/incidents/${encodeURIComponent(fireId)}/source-packages/open`,
+      {
+        file_count: fileCount,
+        total_size_bytes: totalSizeBytes,
+        authorize_private_analysis: true,
+      },
+      options,
+    );
+    try { return parseDailySatellitePackageOpen(payload); }
+    catch { throw new AdminApiError('parse', 'L’autorisation du dépôt de sources est invalide.'); }
+  }
+
+  async finalizeIncidentSourcePackage(
+    packageId: string,
+    options: AdminRequestOptions = {},
+  ): Promise<AdminIncidentSourcePackageResult> {
+    if (!packageId || packageId.length > 128) {
+      throw new AdminApiError('configuration', 'Identifiant du dépôt de sources invalide.');
+    }
+    const payload = await this.requestV2(
+      `/agent-batches/source-packages/${encodeURIComponent(packageId)}/finalize`,
+      {
+        method: 'POST',
+        headers: options.idempotencyKey
+          ? { 'Idempotency-Key': options.idempotencyKey }
+          : undefined,
+      },
+      options,
+    );
+    try { return parseIncidentSourcePackageResult(payload); }
+    catch { throw new AdminApiError('parse', 'Le reçu du dépôt de sources est invalide.'); }
   }
 
   async openIncidentDailySatellitePackage(

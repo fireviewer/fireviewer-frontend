@@ -37,6 +37,7 @@ describe('envoi des produits quotidiens', () => {
       expires_at: '2026-07-12T23:00:00Z',
       maximum_file_size_bytes: 10_000,
       allowed_content_types: ['application/json', 'image/tiff'],
+      already_uploaded_filenames: [],
     });
     const finalizeIncidentDailySatellitePackage = vi.fn().mockResolvedValue({
       package_id: 'SP-fontainebleau-20260712',
@@ -122,5 +123,53 @@ describe('envoi des produits quotidiens', () => {
       uploader: vi.fn(),
     })).rejects.toThrow('ne correspond pas à la journée active');
     expect(openIncidentDailySatellitePackage).not.toHaveBeenCalled();
+  });
+
+  it('reprend un dépôt quotidien sans écraser un produit déjà transféré', async () => {
+    const imageContent = new Uint8Array([73, 73, 42, 0, 1, 2, 3, 4]);
+    const image = new File([imageContent], 'sentinel-six-band.tif', { type: 'image/tiff' });
+    const manifest = new File([JSON.stringify({
+      schema_version: '1.0',
+      expected_analysis_window_id: 'window-20260712',
+      items: [{
+        kind: 'satellite_image',
+        filename: image.name,
+        sha256: await sha256(imageContent),
+      }],
+    })], 'fireviewer-satellite-manifest.json', { type: 'application/json' });
+    const api = {
+      openIncidentDailySatellitePackage: vi.fn().mockResolvedValue({
+        package_id: 'SP-resume',
+        upload_id: 'upload-resume',
+        pathname_prefix: 'firewarning/source-packages/upload-resume',
+        upload_grant: 'grant-signe',
+        expires_at: '2026-07-12T23:00:00Z',
+        maximum_file_size_bytes: 10_000,
+        allowed_content_types: ['application/json', 'image/tiff'],
+        already_uploaded_filenames: ['fireviewer-satellite-manifest.json'],
+      }),
+      finalizeIncidentDailySatellitePackage: vi.fn().mockResolvedValue({
+        package_id: 'SP-resume',
+        batch_ids: ['batch-satellite-1'],
+        item_count: 2,
+      }),
+      getBlobUploadTokenUrl: () => 'https://api.example.test/api/v1/admin/blob-upload-token',
+    } as unknown as AdminApiClient;
+    const uploader = vi.fn<DailySatelliteBlobUploader>(async (pathname, _file, options) => {
+      options.onUploadProgress({ percentage: 100 });
+      return { pathname };
+    });
+
+    await uploadIncidentDailySatellitePackage({
+      api,
+      fireId: 'FR-77-00001',
+      expectedAnalysisWindowId: 'window-20260712',
+      files: [manifest, image],
+      requestOptions: { idempotencyKey: 'satellite-resume-1' },
+      uploader,
+    });
+
+    expect(uploader).toHaveBeenCalledTimes(1);
+    expect(uploader.mock.calls[0]?.[1].name).toBe('sentinel-six-band.tif');
   });
 });

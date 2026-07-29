@@ -345,7 +345,7 @@ describe('client API d’administration', () => {
         { operation_type: 'satellite_media', schedule_state: 'not_scheduled', pending_files: 0, pending_analyses: 0, running_analyses: 0, last_run_at: null, can_run: false, blocked_reason: 'operation_not_scheduled' },
       ] },
     ] };
-    const launched = { fire_id: 'FR-99-00001', episode_id: 'E01', analysis_window_id: 'window-20260712', operation_type: 'user_media', queued_batch_ids: ['batch-user-1'], queued_files: 3 };
+    const launched = { fire_id: 'FR-99-00001', episode_id: 'E01', analysis_window_id: 'window-20260712', operation_type: 'user_media', operation_ids: ['batch-user-1'], queued_files: 3 };
     const fetchMock = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(response(overview))
       .mockResolvedValueOnce(response(launched));
@@ -354,7 +354,7 @@ describe('client API d’administration', () => {
     const loaded = await client.getIncidentAgentOperations('FR-99-00001');
     expect(loaded.actions[0]).toMatchObject({ operation_type: 'user_media', pending_files: 3 });
     expect(loaded.available_windows.map((window) => window.analysis_window_id)).toEqual(['window-20260712', 'window-20260713']);
-    await expect(client.runIncidentAgentOperation('FR-99-00001', 'user_media', 'window-20260712', { idempotencyKey: 'analysis-user-1' })).resolves.toMatchObject({ queued_files: 3, queued_batch_ids: ['batch-user-1'] });
+    await expect(client.runIncidentAgentOperation('FR-99-00001', 'user_media', 'window-20260712', { idempotencyKey: 'analysis-user-1' })).resolves.toMatchObject({ queued_files: 3, operation_ids: ['batch-user-1'] });
 
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
       `${API_ORIGIN}/api/v2/admin/agent-batches/incidents/FR-99-00001/operations`,
@@ -389,6 +389,15 @@ describe('client API d’administration', () => {
       purge_after: '2026-08-12T23:00:00Z',
       finalized_at: '2026-07-12T20:00:00Z',
       batch_ids: ['batch-satellite-1'],
+      classified_item_count: 2,
+      to_classify_item_count: 0,
+      analysis_window_count: 1,
+      date_groups: [{
+        local_date: '2026-07-12',
+        analysis_window_id: 'window-20260712',
+        item_count: 2,
+        batch_ids: ['batch-satellite-1'],
+      }],
       items: [
         { item_id: 'SPI-manifest', original_filename: 'fireviewer-satellite-manifest.json' },
         { item_id: 'SPI-image', original_filename: 'sentinel.png' },
@@ -414,6 +423,13 @@ describe('client API d’administration', () => {
       publication_authorized: false,
       item_count: 2,
       batch_ids: ['batch-satellite-1'],
+      classified_item_count: 2,
+      to_classify_item_count: 0,
+      analysis_window_count: 1,
+      date_groups: [{
+        local_date: '2026-07-12',
+        analysis_window_id: 'window-20260712',
+      }],
     });
 
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
@@ -424,6 +440,95 @@ describe('client API d’administration', () => {
       expected_analysis_window_id: 'window-20260712',
       file_count: 2,
       total_size_bytes: 2048,
+    });
+  });
+
+  it('ouvre puis finalise un dépôt admin multi-jour sans imposer de date', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', API_ORIGIN);
+    const opened = {
+      package_id: 'SP-fontainebleau-mixed',
+      upload_id: 'b'.repeat(32),
+      pathname_prefix: `firewarning/source-packages/${'b'.repeat(32)}`,
+      upload_grant: 'grant-signe',
+      expires_at: '2026-07-29T10:30:00Z',
+      maximum_file_size_bytes: 100_000_000,
+      allowed_content_types: ['image/jpeg', 'text/plain', 'application/geo+json'],
+      already_uploaded_filenames: ['terrain.jpg'],
+    };
+    const finalized = {
+      package_id: opened.package_id,
+      package_kind: 'ADMIN_SOURCES',
+      fire_id: 'FR-77-00001',
+      episode_id: 'E01',
+      state: 'CONVERTED',
+      known_start_date: null,
+      known_end_date: null,
+      location_hint: null,
+      analysis_authorized: true,
+      publication_authorized: false,
+      purge_after: '2026-08-29T10:00:00Z',
+      finalized_at: '2026-07-29T10:00:00Z',
+      batch_ids: ['batch-20260712', 'batch-20260713'],
+      classified_item_count: 2,
+      to_classify_item_count: 1,
+      analysis_window_count: 2,
+      date_groups: [
+        {
+          local_date: '2026-07-12',
+          analysis_window_id: 'window-20260712',
+          item_count: 1,
+          batch_ids: ['batch-20260712'],
+        },
+        {
+          local_date: '2026-07-13',
+          analysis_window_id: 'window-20260713',
+          item_count: 1,
+          batch_ids: ['batch-20260713'],
+        },
+      ],
+      items: [
+        { item_id: 'item-1', original_filename: 'terrain.jpg' },
+        { item_id: 'item-2', original_filename: 'communique.txt' },
+        { item_id: 'item-3', original_filename: 'sans-date.jpg' },
+      ],
+    };
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(response(opened))
+      .mockResolvedValueOnce(response(finalized));
+    const client = new AdminApiClient({ session: SESSION, fetchImpl: fetchMock });
+
+    await expect(client.openIncidentSourcePackage(
+      'FR-77-00001',
+      3,
+      4096,
+      { idempotencyKey: 'incident-source-upload-1' },
+    )).resolves.toMatchObject({
+      package_id: opened.package_id,
+      already_uploaded_filenames: ['terrain.jpg'],
+    });
+    await expect(client.finalizeIncidentSourcePackage(
+      opened.package_id,
+      { idempotencyKey: 'incident-source-upload-1' },
+    )).resolves.toMatchObject({
+      package_kind: 'ADMIN_SOURCES',
+      item_count: 3,
+      classified_item_count: 2,
+      to_classify_item_count: 1,
+      analysis_window_count: 2,
+      date_groups: [
+        { local_date: '2026-07-12', analysis_window_id: 'window-20260712' },
+        { local_date: '2026-07-13', analysis_window_id: 'window-20260713' },
+      ],
+    });
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      `${API_ORIGIN}/api/v2/admin/agent-batches/incidents/FR-77-00001/source-packages/open`,
+      `${API_ORIGIN}/api/v2/admin/agent-batches/source-packages/${opened.package_id}/finalize`,
+    ]);
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      file_count: 3,
+      total_size_bytes: 4096,
+      authorize_private_analysis: true,
     });
   });
 
