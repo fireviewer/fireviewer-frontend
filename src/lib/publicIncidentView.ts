@@ -61,6 +61,68 @@ export type PublicIncidentView = {
     readonly label: string;
     readonly observed_at: string | null;
   }[];
+  readonly active_fire_zone?: {
+    readonly zone_revision_id: string;
+    readonly revision: number;
+    readonly valid_at: string;
+    readonly geometry_geojson: Readonly<Record<string, unknown>>;
+  } | null;
+  readonly daily_intelligence?: readonly {
+    readonly analysis_id: string;
+    readonly episode_id: string;
+    readonly local_date: string;
+    readonly published_at: string;
+    readonly report: {
+      readonly report_revision_id: string;
+      readonly revision: number;
+      readonly title: string;
+      readonly body_markdown: string;
+      readonly reviewed_at: string;
+    };
+    readonly facts: readonly {
+      readonly fact_id: string;
+      readonly category: string;
+      readonly fact_key: string;
+      readonly as_of: string;
+      readonly certainty: string;
+      readonly summary: string;
+      readonly value_number: number | null;
+      readonly value_text: string | null;
+      readonly value_boolean: boolean | null;
+      readonly unit: string | null;
+      readonly evidence: {
+        readonly evidence_kind: string;
+        readonly evidence_id: string;
+        readonly source_annotation_id: string | null;
+        readonly source_reference_url: string | null;
+        readonly license_identifier: string | null;
+      };
+    }[];
+    readonly spatial_results: readonly {
+      readonly proposal_id: string;
+      readonly kind: 'active_fire_point' | 'smoke_origin_point' | 'visible_fire_front' | 'probable_activity_envelope' | 'burned_area_polygon';
+      readonly observed_at: string;
+      readonly geometry_geojson: Readonly<Record<string, unknown>>;
+      readonly geometry_origin: string;
+      readonly horizontal_accuracy_m: number;
+      readonly evidence: {
+        readonly evidence_kind: string;
+        readonly evidence_id: string;
+        readonly source_annotation_id: string | null;
+        readonly source_reference_url: string | null;
+        readonly license_identifier: string | null;
+      };
+    }[];
+  }[];
+  readonly map_gallery?: readonly {
+    readonly capture_id: string;
+    readonly zone_revision_id: string;
+    readonly local_date: string;
+    readonly captured_at: string;
+    readonly image_url: string;
+    readonly width_px: number;
+    readonly height_px: number;
+  }[];
   readonly gallery?: readonly {
     readonly gallery_item_id: string;
     readonly title: string;
@@ -158,6 +220,14 @@ function point(
   };
 }
 
+function geometry(value: unknown, name: string): Readonly<Record<string, unknown>> {
+  const item = record(value);
+  if (!item || typeof item.type !== 'string' || !Array.isArray(item.coordinates)) {
+    throw new PublicIncidentViewError(null, `Géométrie ${name} invalide.`);
+  }
+  return item;
+}
+
 function parseView(value: unknown): PublicIncidentView {
   const root = record(value);
   if (!root || root.schema_version !== '1.0' || typeof root.fire_id !== 'string' || !VIEWER_MANIFEST_FIRE_ID_RE.test(root.fire_id)) throw new PublicIncidentViewError(null, 'La fiche publique ne respecte pas le contrat attendu.');
@@ -177,6 +247,113 @@ function parseView(value: unknown): PublicIncidentView {
     const itemRecord = record(item);
     if (!itemRecord || typeof itemRecord.projection_id !== 'string' || typeof itemRecord.episode_id !== 'string' || (itemRecord.kind !== 'validated_marker' && itemRecord.kind !== 'generalized_area') || (itemRecord.verification_state !== 'VERIFIED' && itemRecord.verification_state !== 'CORROBORATED') || typeof itemRecord.radius_m !== 'number' || !Number.isFinite(itemRecord.radius_m) || itemRecord.radius_m <= 0) throw new PublicIncidentViewError(null, 'Projection de preuve invalide.');
     return { projection_id: itemRecord.projection_id, episode_id: itemRecord.episode_id, kind: itemRecord.kind, verification_state: itemRecord.verification_state, center: point(itemRecord.center, 'evidence.center'), radius_m: itemRecord.radius_m, label: string(itemRecord.label, 'evidence.label')!, observed_at: iso(itemRecord.observed_at, 'evidence.observed_at', true) };
+  });
+  const activeZone = root.active_fire_zone == null ? null : (() => {
+    const item = record(root.active_fire_zone);
+    if (!item || typeof item.zone_revision_id !== 'string' || typeof item.revision !== 'number' || !Number.isInteger(item.revision) || item.revision < 1) {
+      throw new PublicIncidentViewError(null, 'Périmètre public invalide.');
+    }
+    return {
+      zone_revision_id: item.zone_revision_id,
+      revision: item.revision,
+      valid_at: iso(item.valid_at, 'active_fire_zone.valid_at')!,
+      geometry_geojson: geometry(item.geometry_geojson, 'active_fire_zone.geometry_geojson'),
+    };
+  })();
+  const parseAgentEvidence = (value: unknown) => {
+    const item = record(value);
+    if (!item || typeof item.evidence_kind !== 'string' || typeof item.evidence_id !== 'string') {
+      throw new PublicIncidentViewError(null, 'Référence de preuve analysée invalide.');
+    }
+    const sourceReferenceUrl = string(item.source_reference_url, 'agent_evidence.source_reference_url', true);
+    if (sourceReferenceUrl !== null && !sourceReferenceUrl.startsWith('https://')) {
+      throw new PublicIncidentViewError(null, 'URL de provenance analysée invalide.');
+    }
+    return {
+      evidence_kind: item.evidence_kind,
+      evidence_id: item.evidence_id,
+      source_annotation_id: string(item.source_annotation_id, 'agent_evidence.source_annotation_id', true),
+      source_reference_url: sourceReferenceUrl,
+      license_identifier: string(item.license_identifier, 'agent_evidence.license_identifier', true),
+    };
+  };
+  const dailyIntelligence = list(root.daily_intelligence ?? [], 'daily_intelligence').map((item) => {
+    const itemRecord = record(item);
+    const report = record(itemRecord?.report);
+    if (!itemRecord || typeof itemRecord.analysis_id !== 'string' || typeof itemRecord.episode_id !== 'string' || typeof itemRecord.local_date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(itemRecord.local_date) || !report || typeof report.report_revision_id !== 'string' || typeof report.revision !== 'number' || !Number.isInteger(report.revision) || report.revision < 1 || typeof report.title !== 'string' || typeof report.body_markdown !== 'string') {
+      throw new PublicIncidentViewError(null, 'Synthèse quotidienne publiée invalide.');
+    }
+    const facts = list(itemRecord.facts, 'daily_intelligence.facts').map((factValue) => {
+      const fact = record(factValue);
+      if (!fact || typeof fact.fact_id !== 'string' || typeof fact.category !== 'string' || typeof fact.fact_key !== 'string' || typeof fact.certainty !== 'string' || typeof fact.summary !== 'string') {
+        throw new PublicIncidentViewError(null, 'Fait analysé public invalide.');
+      }
+      const valueNumber = fact.value_number === null ? null : typeof fact.value_number === 'number' && Number.isFinite(fact.value_number) ? fact.value_number : (() => { throw new PublicIncidentViewError(null, 'Valeur numérique analysée invalide.'); })();
+      const valueText = string(fact.value_text, 'agent_fact.value_text', true);
+      const valueBoolean = fact.value_boolean === null ? null : typeof fact.value_boolean === 'boolean' ? fact.value_boolean : (() => { throw new PublicIncidentViewError(null, 'Valeur booléenne analysée invalide.'); })();
+      if ([valueNumber, valueText, valueBoolean].filter((entry) => entry !== null).length !== 1) {
+        throw new PublicIncidentViewError(null, 'Valeur du fait analysé invalide.');
+      }
+      return {
+        fact_id: fact.fact_id,
+        category: fact.category,
+        fact_key: fact.fact_key,
+        as_of: iso(fact.as_of, 'agent_fact.as_of')!,
+        certainty: fact.certainty,
+        summary: fact.summary,
+        value_number: valueNumber,
+        value_text: valueText,
+        value_boolean: valueBoolean,
+        unit: string(fact.unit, 'agent_fact.unit', true),
+        evidence: parseAgentEvidence(fact.evidence),
+      };
+    });
+    const spatialResults = list(itemRecord.spatial_results, 'daily_intelligence.spatial_results').map((spatialValue) => {
+      const spatial = record(spatialValue);
+      const kind = String(spatial?.kind ?? '');
+      if (!spatial || typeof spatial.proposal_id !== 'string' || !['active_fire_point', 'smoke_origin_point', 'visible_fire_front', 'probable_activity_envelope', 'burned_area_polygon'].includes(kind) || typeof spatial.geometry_origin !== 'string' || typeof spatial.horizontal_accuracy_m !== 'number' || !Number.isFinite(spatial.horizontal_accuracy_m) || spatial.horizontal_accuracy_m <= 0) {
+        throw new PublicIncidentViewError(null, 'Résultat spatial analysé invalide.');
+      }
+      return {
+        proposal_id: spatial.proposal_id,
+        kind: kind as NonNullable<PublicIncidentView['daily_intelligence']>[number]['spatial_results'][number]['kind'],
+        observed_at: iso(spatial.observed_at, 'agent_spatial.observed_at')!,
+        geometry_geojson: geometry(spatial.geometry_geojson, 'agent_spatial.geometry_geojson'),
+        geometry_origin: spatial.geometry_origin,
+        horizontal_accuracy_m: spatial.horizontal_accuracy_m,
+        evidence: parseAgentEvidence(spatial.evidence),
+      };
+    });
+    return {
+      analysis_id: itemRecord.analysis_id,
+      episode_id: itemRecord.episode_id,
+      local_date: itemRecord.local_date,
+      published_at: iso(itemRecord.published_at, 'daily_intelligence.published_at')!,
+      report: {
+        report_revision_id: report.report_revision_id,
+        revision: report.revision,
+        title: report.title,
+        body_markdown: report.body_markdown,
+        reviewed_at: iso(report.reviewed_at, 'daily_intelligence.report.reviewed_at')!,
+      },
+      facts,
+      spatial_results: spatialResults,
+    };
+  });
+  const mapGallery = list(root.map_gallery ?? [], 'map_gallery').map((item) => {
+    const itemRecord = record(item);
+    if (!itemRecord || typeof itemRecord.capture_id !== 'string' || typeof itemRecord.zone_revision_id !== 'string' || typeof itemRecord.local_date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(itemRecord.local_date) || typeof itemRecord.image_url !== 'string' || !itemRecord.image_url.startsWith(`/api/v1/incident/${root.fire_id}/map-gallery/`) || typeof itemRecord.width_px !== 'number' || itemRecord.width_px < 640 || typeof itemRecord.height_px !== 'number' || itemRecord.height_px < 360) {
+      throw new PublicIncidentViewError(null, 'Capture cartographique publique invalide.');
+    }
+    return {
+      capture_id: itemRecord.capture_id,
+      zone_revision_id: itemRecord.zone_revision_id,
+      local_date: itemRecord.local_date,
+      captured_at: iso(itemRecord.captured_at, 'map_gallery.captured_at')!,
+      image_url: itemRecord.image_url,
+      width_px: itemRecord.width_px,
+      height_px: itemRecord.height_px,
+    };
   });
   const sources = list(root.sources, 'sources').map((item) => {
     const itemRecord = record(item);
@@ -219,7 +396,7 @@ function parseView(value: unknown): PublicIncidentView {
   const participatoryObservationCount = participatoryCount('participatory_observation_count');
   const participatoryPublishedCount = participatoryCount('participatory_published_count');
   const participatoryReceivedCount = participatoryCount('participatory_received_count');
-  return { schema_version: '1.0', fire_id: root.fire_id, canonical_name: string(root.canonical_name, 'canonical_name', true), public_note: string(root.public_note, 'public_note', true), status: string(root.status, 'status')!, verification: root.verification === 'verified' || root.verification === 'corroborated' || root.verification === 'review_required' ? root.verification : (() => { throw new PublicIncidentViewError(null, 'Vérification invalide.'); })(), freshness_at: iso(root.freshness_at, 'freshness_at')!, last_human_validation_at: iso(root.last_human_validation_at, 'last_human_validation_at', true), participatory_observation_count: participatoryObservationCount, participatory_published_count: participatoryPublishedCount, participatory_received_count: participatoryReceivedCount, location, facts: list(root.facts, 'facts').map((entry) => string(entry, 'fact')!), limitations: list(root.limitations, 'limitations').map((entry) => string(entry, 'limitation')!), episodes, observations, evidence_projections: evidenceProjections, gallery, official_resources: officialResources, operational_information: operationalInformation, sources, timeline, model: { state: model.state as PublicIncidentView['model']['state'], version: typeof model.version === 'number' ? model.version : null, sha256: string(model.sha256, 'sha256', true), size_bytes: typeof model.size_bytes === 'number' ? model.size_bytes : null, lod: string(model.lod, 'lod', true), terrain_source_year: typeof model.terrain_source_year === 'number' ? model.terrain_source_year : null, generated_at: iso(model.generated_at, 'generated_at', true), public_download_available: model.public_download_available, limitations: list(model.limitations, 'model limitation').map((entry) => string(entry, 'model limitation')!) }, downloads };
+  return { schema_version: '1.0', fire_id: root.fire_id, canonical_name: string(root.canonical_name, 'canonical_name', true), public_note: string(root.public_note, 'public_note', true), status: string(root.status, 'status')!, verification: root.verification === 'verified' || root.verification === 'corroborated' || root.verification === 'review_required' ? root.verification : (() => { throw new PublicIncidentViewError(null, 'Vérification invalide.'); })(), freshness_at: iso(root.freshness_at, 'freshness_at')!, last_human_validation_at: iso(root.last_human_validation_at, 'last_human_validation_at', true), participatory_observation_count: participatoryObservationCount, participatory_published_count: participatoryPublishedCount, participatory_received_count: participatoryReceivedCount, location, facts: list(root.facts, 'facts').map((entry) => string(entry, 'fact')!), limitations: list(root.limitations, 'limitations').map((entry) => string(entry, 'limitation')!), episodes, observations, evidence_projections: evidenceProjections, active_fire_zone: activeZone, daily_intelligence: dailyIntelligence, map_gallery: mapGallery, gallery, official_resources: officialResources, operational_information: operationalInformation, sources, timeline, model: { state: model.state as PublicIncidentView['model']['state'], version: typeof model.version === 'number' ? model.version : null, sha256: string(model.sha256, 'sha256', true), size_bytes: typeof model.size_bytes === 'number' ? model.size_bytes : null, lod: string(model.lod, 'lod', true), terrain_source_year: typeof model.terrain_source_year === 'number' ? model.terrain_source_year : null, generated_at: iso(model.generated_at, 'generated_at', true), public_download_available: model.public_download_available, limitations: list(model.limitations, 'model limitation').map((entry) => string(entry, 'model limitation')!) }, downloads };
 }
 
 function baseUrl(fireId: string): string {

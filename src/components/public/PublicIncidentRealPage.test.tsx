@@ -9,6 +9,7 @@ import type { ViewerManifestSummary } from '../../lib/viewerManifest';
 
 vi.mock('./TiledSpatialScene3D', () => ({ TiledSpatialScene3D: ({ viewPreset }: { readonly viewPreset: string }) => <div data-testid="tiled-scene-preset">Preset {viewPreset}</div> }));
 vi.mock('../../lib/publicSpatialScene', () => ({ loadPublicSpatialScene: vi.fn() }));
+vi.mock('../../lib/manifestClient', () => ({ getViewerManifestApiOrigin: () => 'https://api.firewarning.test' }));
 
 const summary: ViewerManifestSummary = { schemaVersion: '2.0', fireId: 'FR-83-00042', episodeId: 'E01', statusCode: 'MONITORING', validatedAt: null, reviewRequired: false, location: null, asset: null, scene: null, frame: null, freshness: { incident_at: '2026-07-15T10:00:00Z', terrain_source_year: null, generated_at: null }, modelState: 'not_available', publicNotice: 'Notice publique.', sources: [], history: [], journal: [] };
 const view: PublicIncidentView = { schema_version: '1.0', fire_id: 'FR-83-00042', canonical_name: 'Massif test', public_note: null, status: 'MONITORING', verification: 'verified', freshness_at: '2026-07-15T10:00:00Z', last_human_validation_at: '2026-07-15T10:02:00Z', location: null, facts: ['Observation validée.'], limitations: ['Donnée datée.'], episodes: [{ episode_id: 'E01', ordinal: 1, status: 'MONITORING', verification_state: 'VERIFIED', corroborating_source_count: 1, evidence_basis_at: '2026-07-15T10:00:00Z', estimated_area_ha: 12, evacuation_established: false, model_generation_eligible: true, review_required: false, started_at: '2026-07-15T09:00:00Z', last_observed_at: '2026-07-15T10:00:00Z', validated_at: '2026-07-15T10:02:00Z', ended_at: null, is_current: true, version: 1 }], observations: [{ observation_id: 'O-1', episode_id: 'E01', type: 'institutional', observed_at: '2026-07-15T10:00:00Z', received_at: '2026-07-15T10:01:00Z', uncertainty_m: 250, area_label: 'Massif test', verification_state: 'VERIFIED', spatial_mode: 'WITHHELD' }], evidence_projections: [{ projection_id: 'P-1', episode_id: 'E01', kind: 'validated_marker', verification_state: 'VERIFIED', center: { coordinates: [6.1, 43.2], horizontal_uncertainty_m: 25 }, radius_m: 25, label: 'Image utilisateur validée', observed_at: '2026-07-15T10:00:00Z' }], sources: [], timeline: [{ occurred_at: '2026-07-15T10:00:00Z', kind: 'observation', label: 'Observation validée', episode_id: 'E01' }], model: { state: 'not_available', version: null, sha256: null, size_bytes: null, lod: null, terrain_source_year: null, generated_at: null, public_download_available: false, limitations: [] }, downloads: [] };
@@ -113,6 +114,82 @@ it('affiche seulement les éléments de galerie déjà fournis par le contrat pu
   expect(await screen.findByRole('heading', { name: 'Galerie de l’événement' })).toBeVisible();
   expect(screen.getByRole('img', { name: 'Panache observé au-dessus du massif.' })).toHaveAttribute('src', 'https://media.example.invalid/image.jpg');
   expect(screen.getByText('Légende validée.')).toBeVisible();
+});
+
+it('affiche seulement les résultats analysés déjà validés et publiés', async () => {
+  const user = userEvent.setup();
+  const publishedView: PublicIncidentView = {
+    ...view,
+    daily_intelligence: [{
+      analysis_id: 'analysis-2026-07-15',
+      episode_id: 'E01',
+      local_date: '2026-07-15',
+      published_at: '2026-07-15T12:00:00Z',
+      report: {
+        report_revision_id: 'SITREP-1',
+        revision: 1,
+        title: 'Situation validée',
+        body_markdown: 'Le front reste surveillé.',
+        reviewed_at: '2026-07-15T11:45:00Z',
+      },
+      facts: [{
+        fact_id: 'FACT-1',
+        category: 'resources',
+        fact_key: 'teams_engaged',
+        as_of: '2026-07-15T10:30:00Z',
+        certainty: 'explicitly_written',
+        summary: '120 personnes engagées.',
+        value_number: 120,
+        value_text: null,
+        value_boolean: null,
+        unit: 'personnes',
+        evidence: {
+          evidence_kind: 'article_text',
+          evidence_id: 'MEDIA-1',
+          source_annotation_id: null,
+          source_reference_url: 'https://example.invalid/source',
+          license_identifier: 'SOURCE-ONLY',
+        },
+      }],
+      spatial_results: [{
+        proposal_id: 'SPATIAL-1',
+        kind: 'active_fire_point',
+        observed_at: '2026-07-15T10:20:00Z',
+        geometry_geojson: { type: 'Point', coordinates: [6.1, 43.2] },
+        geometry_origin: 'SATELLITE_GEOTRANSFORM',
+        horizontal_accuracy_m: 25,
+        evidence: {
+          evidence_kind: 'satellite_image',
+          evidence_id: 'SAT-1',
+          source_annotation_id: 'ANN-1',
+          source_reference_url: null,
+          license_identifier: null,
+        },
+      }],
+    }],
+    map_gallery: [{
+      capture_id: 'CAPTURE-1',
+      zone_revision_id: 'AZR-1',
+      local_date: '2026-07-15',
+      captured_at: '2026-07-15T12:00:00Z',
+      image_url: '/api/v1/incident/FR-83-00042/map-gallery/CAPTURE-1',
+      width_px: 960,
+      height_px: 540,
+    }],
+  };
+  render(<PublicIncidentRealPage summary={summary} checkedAt="2026-07-15T10:00:00Z" stale={false} refreshing={false} onRefresh={vi.fn()} detailRequest={Promise.resolve({ view: publishedView, error: null })} />);
+
+  await screen.findByText('Situation analysée et validée');
+  const intelligenceSummary = screen.getByText('Situation analysée et validée').closest('summary');
+  if (!intelligenceSummary) throw new Error('La situation analysée doit être dépliable.');
+  await user.click(intelligenceSummary);
+
+  expect(screen.getByRole('heading', { name: 'Situation validée' })).toBeVisible();
+  expect(screen.getByText('120 personnes engagées.')).toBeVisible();
+  expect(screen.getByText('Point actif')).toBeVisible();
+  expect(screen.getByRole('link', { name: /Voir la source/ })).toHaveAttribute('href', 'https://example.invalid/source');
+  expect(screen.getByRole('heading', { name: 'Évolution cartographique' })).toBeVisible();
+  expect(screen.getByRole('img', { name: /Zone de l’incendie publiée/ })).toHaveAttribute('src', 'https://api.firewarning.test/api/v1/incident/FR-83-00042/map-gallery/CAPTURE-1');
 });
 
 it('désactive la 3D sans retirer les informations publiques', async () => {
