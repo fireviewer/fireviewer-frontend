@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   review: vi.fn(async () => ({})),
   publish: vi.fn(async () => ({})),
   changePublication: vi.fn(async () => ({})),
+  reviewFact: vi.fn(async () => ({})),
+  reviewReport: vi.fn(async () => ({})),
 }));
 
 vi.mock('./AdminApiContext', () => ({
@@ -23,6 +25,8 @@ vi.mock('./AdminApiContext', () => ({
     reviewActiveFireZoneRevision: mocks.review,
     publishSpatialPackage: mocks.publish,
     changePublication: mocks.changePublication,
+    reviewIncidentAgentFact: mocks.reviewFact,
+    reviewIncidentSituationReport: mocks.reviewReport,
   }),
   useAdminQuery: () => ({
     state: {
@@ -58,6 +62,51 @@ vi.mock('./AdminApiContext', () => ({
           gltf_polygons: [[[[0, 0, 0], [100, 0, 0], [100, 0, -100], [0, 0, 0]]]],
         }],
         agent_reviews: [],
+        daily_intelligence: [{
+          analysis_id: 'ANALYSIS-2026-07-12',
+          local_date: '2026-07-12',
+          window_state: 'REVIEW_PENDING',
+          operation_outcomes: {
+            user_media: { outcome: 'partial_failure', terminal: true },
+            source_research: { outcome: 'absent', terminal: true },
+          },
+          spatial_counts: { active_fire_point: 1 },
+          contradictions: [],
+          report: {
+            report_revision_id: 'SITREP-01',
+            revision: 1,
+            title: 'Situation du 2026-07-12',
+            body_markdown: 'Une synthèse privée à contrôler.',
+            review_state: 'DRAFT',
+            reviewed_by: null,
+            reviewed_at: null,
+            review_reason: null,
+            created_at: '2026-07-12T22:00:00Z',
+          },
+          facts: [{
+            fact_id: 'FACT-01',
+            category: 'resources',
+            fact_key: 'firefighters',
+            as_of: '2026-07-12T18:00:00Z',
+            certainty: 'explicitly_written',
+            summary: 'Cent pompiers engagés.',
+            value_number: 100,
+            value_text: null,
+            value_boolean: null,
+            unit: 'personnes',
+            conflict_group_id: null,
+            review_state: 'PENDING',
+            version: 1,
+            source: {
+              batch_id: 'BATCH-01',
+              input_id: 'INPUT-01',
+              media_type: 'document',
+              media_sha256: 'a'.repeat(64),
+              evidence_kind: 'article_text',
+              evidence_id: 'article-1',
+            },
+          }],
+        }],
       },
     },
     reload: mocks.reload,
@@ -115,5 +164,27 @@ describe('outils de revue spatiale 3D', () => {
       expect.objectContaining({ idempotencyKey: expect.stringMatching(/^project-map-publish-/) }),
     );
     expect(await screen.findByText('Carte publiée sur le site public.')).toBeVisible();
+  });
+
+  it('valide les faits et le rapport consolidé dans la revue existante', async () => {
+    const user = userEvent.setup();
+    render(<AdminIncidentSpatialReviewPage fireId="FR-99-00001" />);
+
+    expect(screen.getByText('Cent pompiers engagés.')).toBeVisible();
+    expect(screen.getByText(/BATCH-01/)).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Valider le fait' }));
+    expect(mocks.reviewFact).toHaveBeenCalledWith(
+      'FR-99-00001',
+      'FACT-01',
+      expect.objectContaining({ action: 'validate', expected_version: 1 }),
+      expect.objectContaining({ idempotencyKey: expect.stringMatching(/^fact-validate-/) }),
+    );
+    await user.click(screen.getByRole('button', { name: 'Valider le rapport' }));
+    expect(mocks.reviewReport).toHaveBeenCalledWith(
+      'FR-99-00001',
+      'SITREP-01',
+      expect.objectContaining({ action: 'validate', expected_revision: 1 }),
+      expect.objectContaining({ idempotencyKey: expect.stringMatching(/^daily-report-validate-/) }),
+    );
   });
 });

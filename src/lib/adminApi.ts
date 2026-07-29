@@ -186,12 +186,37 @@ export interface AdminActiveFireZoneRevision {
   readonly reviewed_by: string | null; readonly reviewed_at: string | null; readonly review_reason: string | null;
   readonly created_at: string;
 }
+export interface AdminAgentFactProposal {
+  readonly fact_id: string; readonly category: string; readonly fact_key: string; readonly as_of: string;
+  readonly certainty: string; readonly summary: string; readonly value_number: number | null;
+  readonly value_text: string | null; readonly value_boolean: boolean | null; readonly unit: string | null;
+  readonly conflict_group_id: string | null; readonly review_state: 'PENDING' | 'VALIDATED' | 'REJECTED' | 'INVALIDATED';
+  readonly version: number;
+  readonly source: {
+    readonly batch_id: string; readonly input_id: string; readonly media_type: string;
+    readonly media_sha256: string | null; readonly evidence_kind: string; readonly evidence_id: string;
+  };
+}
+export interface AdminDailyIntelligenceReview {
+  readonly analysis_id: string; readonly local_date: string; readonly window_state: string;
+  readonly report: {
+    readonly report_revision_id: string; readonly revision: number; readonly title: string;
+    readonly body_markdown: string; readonly review_state: 'DRAFT' | 'VALIDATED' | 'REJECTED' | 'INVALIDATED';
+    readonly reviewed_by: string | null; readonly reviewed_at: string | null;
+    readonly review_reason: string | null; readonly created_at: string;
+  } | null;
+  readonly facts: readonly AdminAgentFactProposal[];
+  readonly operation_outcomes: Readonly<Record<string, unknown>>;
+  readonly spatial_counts: Readonly<Record<string, number>>;
+  readonly contradictions: readonly Readonly<Record<string, unknown>>[];
+}
 export interface AdminIncidentSpatialReviewWorkspace {
   readonly fire_id: string; readonly episode_id: string;
   readonly scene: { readonly asset_url: string | null; readonly asset_version: number | null; readonly sha256: string | null; readonly package_id: string | null; readonly zone_id: string | null; readonly zone_revision: number | null; readonly package_state: string | null; readonly publication_id: string | null; readonly publication_state: string | null; readonly publication_active: boolean; readonly catalog_url: string | null; readonly files: Readonly<Record<string, string>>; readonly origin_wgs84: readonly [number, number, number]; readonly local_frame: 'ENU'; readonly gltf_profile: 'gltf-eun-negz-metric-v1' } | null;
   readonly markers: readonly AdminIncidentSpatialMarker[];
   readonly zone_revisions: readonly AdminActiveFireZoneRevision[];
   readonly agent_reviews: readonly { readonly review_id: string; readonly batch_id: string; readonly state: string; readonly reason_codes: readonly string[]; readonly completed_at: string | null; readonly result: Readonly<Record<string, unknown>> | null }[];
+  readonly daily_intelligence: readonly AdminDailyIntelligenceReview[];
 }
 
 export interface AdminSourceUpdateInput {
@@ -995,6 +1020,66 @@ function parseActiveFireZoneRevision(value: unknown): AdminActiveFireZoneRevisio
   };
 }
 
+function parseAgentFactProposal(value: unknown): AdminAgentFactProposal {
+  if (!isRecord(value) || !isRecord(value.source)) throw new Error('Fait agentique invalide.');
+  if (value.value_boolean !== null && typeof value.value_boolean !== 'boolean') throw new Error('Valeur booléenne du fait invalide.');
+  return {
+    fact_id: readString(value.fact_id, 'fact_id', { max: 128 })!,
+    category: readString(value.category, 'category', { max: 64 })!,
+    fact_key: readString(value.fact_key, 'fact_key', { max: 128 })!,
+    as_of: readIsoDate(value.as_of, 'as_of'),
+    certainty: readString(value.certainty, 'certainty', { max: 32 })!,
+    summary: readString(value.summary, 'summary', { max: 1_000 })!,
+    value_number: value.value_number === null ? null : readFiniteNumber(value.value_number, 'value_number'),
+    value_text: readString(value.value_text, 'value_text', { nullable: true }),
+    value_boolean: value.value_boolean,
+    unit: readString(value.unit, 'unit', { nullable: true, max: 64 }),
+    conflict_group_id: readString(value.conflict_group_id, 'conflict_group_id', { nullable: true, max: 128 }),
+    review_state: readEnum(value.review_state, 'review_state', ['PENDING', 'VALIDATED', 'REJECTED', 'INVALIDATED'] as const),
+    version: readPositiveInteger(value.version, 'version'),
+    source: {
+      batch_id: readString(value.source.batch_id, 'source.batch_id', { max: 128 })!,
+      input_id: readString(value.source.input_id, 'source.input_id', { max: 128 })!,
+      media_type: readString(value.source.media_type, 'source.media_type', { max: 64 })!,
+      media_sha256: readString(value.source.media_sha256, 'source.media_sha256', { nullable: true, max: 64 }),
+      evidence_kind: readString(value.source.evidence_kind, 'source.evidence_kind', { max: 32 })!,
+      evidence_id: readString(value.source.evidence_id, 'source.evidence_id', { max: 128 })!,
+    },
+  };
+}
+
+function parseDailyIntelligenceReview(value: unknown): AdminDailyIntelligenceReview {
+  if (!isRecord(value) || !Array.isArray(value.facts) || !isRecord(value.operation_outcomes) || !isRecord(value.spatial_counts) || !Array.isArray(value.contradictions)) throw new Error('Synthèse agentique quotidienne invalide.');
+  let report: AdminDailyIntelligenceReview['report'] = null;
+  if (value.report !== null) {
+    if (!isRecord(value.report)) throw new Error('Rapport agentique invalide.');
+    report = {
+      report_revision_id: readString(value.report.report_revision_id, 'report_revision_id', { max: 128 })!,
+      revision: readPositiveInteger(value.report.revision, 'report.revision'),
+      title: readString(value.report.title, 'report.title', { max: 255 })!,
+      body_markdown: readString(value.report.body_markdown, 'report.body_markdown')!,
+      review_state: readEnum(value.report.review_state, 'report.review_state', ['DRAFT', 'VALIDATED', 'REJECTED', 'INVALIDATED'] as const),
+      reviewed_by: readString(value.report.reviewed_by, 'report.reviewed_by', { nullable: true, max: 255 }),
+      reviewed_at: value.report.reviewed_at === null ? null : readIsoDate(value.report.reviewed_at, 'report.reviewed_at'),
+      review_reason: readString(value.report.review_reason, 'report.review_reason', { nullable: true, max: 500 }),
+      created_at: readIsoDate(value.report.created_at, 'report.created_at'),
+    };
+  }
+  return {
+    analysis_id: readString(value.analysis_id, 'analysis_id', { max: 128 })!,
+    local_date: readString(value.local_date, 'local_date', { max: 10 })!,
+    window_state: readString(value.window_state, 'window_state', { max: 64 })!,
+    report,
+    facts: value.facts.map(parseAgentFactProposal),
+    operation_outcomes: value.operation_outcomes,
+    spatial_counts: Object.fromEntries(Object.entries(value.spatial_counts).map(([key, count]) => [key, readNonNegativeInteger(count, `spatial_counts.${key}`)])),
+    contradictions: value.contradictions.map((item) => {
+      if (!isRecord(item)) throw new Error('Contradiction agentique invalide.');
+      return item;
+    }),
+  };
+}
+
 function parseIncidentSpatialReviewWorkspace(value: unknown): AdminIncidentSpatialReviewWorkspace {
   if (!isRecord(value) || !Array.isArray(value.markers) || !Array.isArray(value.zone_revisions) || !Array.isArray(value.agent_reviews)) throw new Error('Espace de revue spatiale invalide.');
   let scene: AdminIncidentSpatialReviewWorkspace['scene'] = null;
@@ -1024,6 +1109,10 @@ function parseIncidentSpatialReviewWorkspace(value: unknown): AdminIncidentSpati
     markers: value.markers.map((item) => { if (!isRecord(item) || typeof item.spatial_display_allowed !== 'boolean') throw new Error('Marqueur spatial invalide.'); return { marker_id: readString(item.marker_id, 'marker_id', { max: 128 })!, source_kind: readEnum(item.source_kind, 'source_kind', ['observation', 'agent_media'] as const), marker_type: readString(item.marker_type, 'marker_type', { max: 64 })!, longitude: readFiniteNumber(item.longitude, 'longitude'), latitude: readFiniteNumber(item.latitude, 'latitude'), altitude_m: item.altitude_m === null ? null : readFiniteNumber(item.altitude_m, 'altitude_m'), horizontal_accuracy_m: item.horizontal_accuracy_m === null ? null : readFiniteNumber(item.horizontal_accuracy_m, 'horizontal_accuracy_m'), geometry_origin: readString(item.geometry_origin, 'geometry_origin', { max: 64 })!, review_state: readString(item.review_state, 'review_state', { max: 64 })!, observed_at: item.observed_at === null ? null : readIsoDate(item.observed_at, 'observed_at'), spatial_display_allowed: item.spatial_display_allowed, gltf_position: item.gltf_position === null ? null : parseGltfPoint(item.gltf_position, 'gltf_position'), version: readPositiveInteger(item.version, 'version') }; }),
     zone_revisions: value.zone_revisions.map(parseActiveFireZoneRevision),
     agent_reviews: value.agent_reviews.map((item) => { if (!isRecord(item) || !Array.isArray(item.reason_codes) || (item.result !== null && !isRecord(item.result))) throw new Error('Revue agentique invalide.'); return { review_id: readString(item.review_id, 'review_id', { max: 128 })!, batch_id: readString(item.batch_id, 'batch_id', { max: 128 })!, state: readString(item.state, 'state', { max: 64 })!, reason_codes: item.reason_codes.map((reason) => readString(reason, 'reason_code', { max: 128 })!), completed_at: item.completed_at === null ? null : readIsoDate(item.completed_at, 'completed_at'), result: item.result }; }),
+    daily_intelligence: value.daily_intelligence === undefined ? [] : (() => {
+      if (!Array.isArray(value.daily_intelligence)) throw new Error('Synthèses quotidiennes invalides.');
+      return value.daily_intelligence.map(parseDailyIntelligenceReview);
+    })(),
   };
 }
 
@@ -2050,6 +2139,16 @@ export class AdminApiClient {
   async resolveIncidentAgentReview(fireId: string, reviewId: string, input: { action: 'approve' | 'reject'; expected_state: 'PENDING' | 'IN_REVIEW'; reason: string }, options: AdminRequestOptions): Promise<void> {
     const payload = await this.postJson(`/incidents/${encodeURIComponent(fireId)}/agent-reviews/${encodeURIComponent(reviewId)}/resolve`, input, options);
     if (!isRecord(payload) || payload.review_id !== reviewId) throw new AdminApiError('parse', 'La résolution de revue agentique est invalide.');
+  }
+
+  async reviewIncidentAgentFact(fireId: string, factId: string, input: { action: 'validate' | 'reject'; expected_version: number; reason: string }, options: AdminRequestOptions): Promise<void> {
+    const payload = await this.postJson(`/incidents/${encodeURIComponent(fireId)}/agent-facts/${encodeURIComponent(factId)}/review`, input, options);
+    if (!isRecord(payload) || payload.fact_id !== factId) throw new AdminApiError('parse', 'La revue du fait sourcé est invalide.');
+  }
+
+  async reviewIncidentSituationReport(fireId: string, reportRevisionId: string, input: { action: 'validate' | 'reject'; expected_revision: number; expected_state: 'DRAFT'; reason: string }, options: AdminRequestOptions): Promise<void> {
+    const payload = await this.postJson(`/incidents/${encodeURIComponent(fireId)}/agent-situation-reports/${encodeURIComponent(reportRevisionId)}/review`, input, options);
+    if (!isRecord(payload) || payload.report_revision_id !== reportRevisionId) throw new AdminApiError('parse', 'La revue du rapport quotidien est invalide.');
   }
 
   async updateSource(sourceKey: string, input: AdminSourceUpdateInput, options: AdminRequestOptions): Promise<void> {

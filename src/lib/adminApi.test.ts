@@ -391,10 +391,17 @@ describe('client API d’administration', () => {
       markers: [{ marker_id: 'IM-1', source_kind: 'agent_media', marker_type: 'media_capture', longitude: 6.021, latitude: 43.291, altitude_m: null, horizontal_accuracy_m: 12, geometry_origin: 'METADATA', review_state: 'PENDING', observed_at: null, spatial_display_allowed: false, gltf_position: [12, 0, -8], version: 1 }],
       zone_revisions: [{ zone_revision_id: 'azr-1', revision: 1, valid_at: '2026-07-16T10:00:00Z', geometry_geojson: { type: 'MultiPolygon', coordinates: [] }, gltf_polygons: [[[[0, 0, 0], [10, 0, 0], [0, 0, -10], [0, 0, 0]]]], geometry_origin: 'HUMAN_AUTHORED', supporting_marker_ids: ['IM-1'], source_revision_ids: [], review_state: 'DRAFT', supersedes_zone_revision_id: null, reason: 'Contour de test suffisamment explicite.', created_by: 'admin', reviewed_by: null, reviewed_at: null, review_reason: null, created_at: '2026-07-16T10:00:00Z' }],
       agent_reviews: [],
+      daily_intelligence: [{
+        analysis_id: 'analysis-1', local_date: '2026-07-16', window_state: 'REVIEW_PENDING',
+        operation_outcomes: { user_media: { outcome: 'succeeded', terminal: true } },
+        spatial_counts: { active_fire_point: 1 }, contradictions: [],
+        report: { report_revision_id: 'SITREP-1', revision: 1, title: 'Situation du 16 juillet', body_markdown: 'Synthèse privée.', review_state: 'DRAFT', reviewed_by: null, reviewed_at: null, review_reason: null, created_at: '2026-07-16T10:00:00Z' },
+        facts: [{ fact_id: 'FACT-1', category: 'resources', fact_key: 'firefighters', as_of: '2026-07-16T09:00:00Z', certainty: 'explicitly_written', summary: 'Cent pompiers engagés.', value_number: 100, value_text: null, value_boolean: null, unit: 'personnes', conflict_group_id: null, review_state: 'PENDING', version: 1, source: { batch_id: 'BATCH-1', input_id: 'INPUT-1', media_type: 'document', media_sha256: 'b'.repeat(64), evidence_kind: 'article_text', evidence_id: 'article-1' } }],
+      }],
     }));
     const client = new AdminApiClient({ session: SESSION, fetchImpl: fetchMock });
 
-    await expect(client.getIncidentSpatialReview('FR-83-00042')).resolves.toMatchObject({ markers: [{ gltf_position: [12, 0, -8] }], zone_revisions: [{ review_state: 'DRAFT' }] });
+    await expect(client.getIncidentSpatialReview('FR-83-00042')).resolves.toMatchObject({ markers: [{ gltf_position: [12, 0, -8] }], zone_revisions: [{ review_state: 'DRAFT' }], daily_intelligence: [{ report: { report_revision_id: 'SITREP-1' }, facts: [{ source: { batch_id: 'BATCH-1' } }] }] });
     expect(fetchMock).toHaveBeenCalledWith(`${API_ORIGIN}/api/v1/admin/incidents/FR-83-00042/spatial-review`, expect.objectContaining({ method: 'GET' }));
   });
 
@@ -408,5 +415,19 @@ describe('client API d’administration', () => {
       `${API_ORIGIN}/api/v1/admin/incidents/FR-83-00042/spatial-review/project-pick`,
       expect.objectContaining({ method: 'POST', body: JSON.stringify({ gltf_position: [15, 2, -8] }) }),
     );
+  });
+
+  it('envoie les décisions de faits et rapports dans la revue existante', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', API_ORIGIN);
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(response({ fact_id: 'FACT-1' }))
+      .mockResolvedValueOnce(response({ report_revision_id: 'SITREP-1' }));
+    const client = new AdminApiClient({ session: SESSION, fetchImpl: fetchMock });
+
+    await expect(client.reviewIncidentAgentFact('FR-83-00042', 'FACT-1', { action: 'validate', expected_version: 1, reason: 'Fait et preuve source contrôlés.' }, { idempotencyKey: 'fact-review-1' })).resolves.toBeUndefined();
+    await expect(client.reviewIncidentSituationReport('FR-83-00042', 'SITREP-1', { action: 'validate', expected_revision: 1, expected_state: 'DRAFT', reason: 'Rapport quotidien contrôlé humainement.' }, { idempotencyKey: 'report-review-1' })).resolves.toBeUndefined();
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(`${API_ORIGIN}/api/v1/admin/incidents/FR-83-00042/agent-facts/FACT-1/review`);
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(`${API_ORIGIN}/api/v1/admin/incidents/FR-83-00042/agent-situation-reports/SITREP-1/review`);
   });
 });
