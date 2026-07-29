@@ -265,7 +265,7 @@ describe('pages de workflow administrateur', () => {
     expect(screen.queryByLabelText('Fichiers du lot quotidien')).not.toBeInTheDocument();
   });
 
-  it('affiche l’ajout compact des produits uniquement pour la journée satellite active', async () => {
+  it('sélectionne une fenêtre préparée sans saisie de date pour les produits satellite', async () => {
     vi.stubEnv('VITE_API_BASE_URL', API_ORIGIN);
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input) => {
       if (String(input).includes('/api/v2/admin/agent-batches/')) return response({
@@ -279,16 +279,41 @@ describe('pages de workflow administrateur', () => {
           { operation_type: 'source_research', schedule_state: 'required', pending_files: 0, pending_analyses: 0, running_analyses: 0, last_run_at: null, can_run: false, blocked_reason: 'dispatch_disabled' },
           { operation_type: 'satellite_media', schedule_state: 'required', pending_files: 0, pending_analyses: 0, running_analyses: 0, last_run_at: null, can_run: false, blocked_reason: 'input_not_ready' },
         ],
+        available_windows: [
+          {
+            analysis_window_id: 'window-20260712',
+            local_date: '2026-07-12',
+            campaign_day_state: 'ready',
+            actions: [
+              { operation_type: 'user_media', schedule_state: 'required', pending_files: 1, pending_analyses: 0, running_analyses: 0, last_run_at: null, can_run: false, blocked_reason: 'dispatch_disabled' },
+              { operation_type: 'source_research', schedule_state: 'required', pending_files: 0, pending_analyses: 0, running_analyses: 0, last_run_at: null, can_run: false, blocked_reason: 'dispatch_disabled' },
+              { operation_type: 'satellite_media', schedule_state: 'required', pending_files: 0, pending_analyses: 0, running_analyses: 0, last_run_at: null, can_run: false, blocked_reason: 'input_not_ready' },
+            ],
+          },
+          {
+            analysis_window_id: 'window-20260713',
+            local_date: '2026-07-13',
+            campaign_day_state: 'ready',
+            actions: [
+              { operation_type: 'user_media', schedule_state: 'required', pending_files: 2, pending_analyses: 1, running_analyses: 0, last_run_at: null, can_run: false, blocked_reason: 'dispatch_disabled' },
+              { operation_type: 'source_research', schedule_state: 'declared_absent', pending_files: 0, pending_analyses: 0, running_analyses: 0, last_run_at: null, can_run: false, blocked_reason: 'operation_declared_absent' },
+              { operation_type: 'satellite_media', schedule_state: 'required', pending_files: 0, pending_analyses: 0, running_analyses: 0, last_run_at: null, can_run: false, blocked_reason: 'input_not_ready' },
+            ],
+          },
+        ],
       });
       return response({ fire_id: 'FR-77-00001', sources: [], media_references: [] });
     });
     vi.stubGlobal('fetch', fetchMock);
+    const user = userEvent.setup();
     renderAdmin(<AdminIncidentSourcesMediaPage fireId="FR-77-00001" />);
 
     expect(await screen.findByRole('heading', { name: 'Ajouter les produits de la journée' })).toBeInTheDocument();
     expect(screen.getByLabelText('Fichiers du lot quotidien')).toHaveAttribute('multiple');
-    expect(screen.queryByLabelText(/date/i)).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Ajouter à la journée active' })).toBeDisabled();
+    expect(screen.queryByRole('textbox', { name: /date/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Ajouter à cette fenêtre' })).toBeDisabled();
+    await user.selectOptions(screen.getByRole('combobox'), 'window-20260713');
+    expect(screen.getByText((_, element) => element?.tagName === 'P' && element.textContent?.includes('Fenêtre préparée : 13/07/2026') === true)).toBeInTheDocument();
   });
 
   it('publie depuis l’aperçu avec la session administrateur active', async () => {

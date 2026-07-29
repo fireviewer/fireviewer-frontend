@@ -333,6 +333,17 @@ describe('client API d’administration', () => {
       { operation_type: 'user_media', schedule_state: 'required', pending_files: 3, pending_analyses: 1, running_analyses: 0, last_run_at: null, can_run: true, blocked_reason: null },
       { operation_type: 'source_research', schedule_state: 'required', pending_files: 0, pending_analyses: 0, running_analyses: 1, last_run_at: '2026-07-18T10:00:00Z', can_run: false, blocked_reason: 'already_running' },
       { operation_type: 'satellite_media', schedule_state: 'not_scheduled', pending_files: 0, pending_analyses: 0, running_analyses: 0, last_run_at: null, can_run: false, blocked_reason: 'operation_not_scheduled' },
+    ], available_windows: [
+      { analysis_window_id: 'window-20260712', local_date: '2026-07-12', campaign_day_state: 'ready', actions: [
+        { operation_type: 'user_media', schedule_state: 'required', pending_files: 3, pending_analyses: 1, running_analyses: 0, last_run_at: null, can_run: true, blocked_reason: null },
+        { operation_type: 'source_research', schedule_state: 'required', pending_files: 0, pending_analyses: 0, running_analyses: 1, last_run_at: '2026-07-18T10:00:00Z', can_run: false, blocked_reason: 'already_running' },
+        { operation_type: 'satellite_media', schedule_state: 'not_scheduled', pending_files: 0, pending_analyses: 0, running_analyses: 0, last_run_at: null, can_run: false, blocked_reason: 'operation_not_scheduled' },
+      ] },
+      { analysis_window_id: 'window-20260713', local_date: '2026-07-13', campaign_day_state: 'ready', actions: [
+        { operation_type: 'user_media', schedule_state: 'required', pending_files: 1, pending_analyses: 1, running_analyses: 0, last_run_at: null, can_run: true, blocked_reason: null },
+        { operation_type: 'source_research', schedule_state: 'declared_absent', pending_files: 0, pending_analyses: 0, running_analyses: 0, last_run_at: null, can_run: false, blocked_reason: 'operation_declared_absent' },
+        { operation_type: 'satellite_media', schedule_state: 'not_scheduled', pending_files: 0, pending_analyses: 0, running_analyses: 0, last_run_at: null, can_run: false, blocked_reason: 'operation_not_scheduled' },
+      ] },
     ] };
     const launched = { fire_id: 'FR-99-00001', episode_id: 'E01', analysis_window_id: 'window-20260712', operation_type: 'user_media', queued_batch_ids: ['batch-user-1'], queued_files: 3 };
     const fetchMock = vi.fn<typeof fetch>()
@@ -342,6 +353,7 @@ describe('client API d’administration', () => {
 
     const loaded = await client.getIncidentAgentOperations('FR-99-00001');
     expect(loaded.actions[0]).toMatchObject({ operation_type: 'user_media', pending_files: 3 });
+    expect(loaded.available_windows.map((window) => window.analysis_window_id)).toEqual(['window-20260712', 'window-20260713']);
     await expect(client.runIncidentAgentOperation('FR-99-00001', 'user_media', 'window-20260712', { idempotencyKey: 'analysis-user-1' })).resolves.toMatchObject({ queued_files: 3, queued_batch_ids: ['batch-user-1'] });
 
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([

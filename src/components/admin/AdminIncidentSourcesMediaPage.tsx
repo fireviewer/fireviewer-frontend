@@ -17,7 +17,7 @@ function externalHref(value: string | null): string | null {
 
 const ANALYSIS_LABELS: Record<AdminAgentOperationType, { title: string; detail: string }> = {
   user_media: { title: 'Analyser les fichiers reçus', detail: 'Photos, vidéos et audios transmis avec consentement.' },
-  source_research: { title: 'Rechercher et analyser les sources publiques', detail: 'Recherche bornée à la coupure de la journée active.' },
+  source_research: { title: 'Rechercher et analyser les sources publiques', detail: 'Recherche bornée à la coupure de la fenêtre sélectionnée.' },
   satellite_media: { title: 'Analyser les images satellites', detail: 'Produits satellite, points chauds et vues thermiques disponibles.' },
 };
 
@@ -74,6 +74,7 @@ export function AdminIncidentSourcesMediaPage({ fireId }: { readonly fireId: str
   const mutation = useAdminMutation();
   const analysisMutation = useAdminMutation();
   const satelliteUploadMutation = useAdminMutation();
+  const clearSatelliteUploadMutation = satelliteUploadMutation.clear;
   const [updated, setUpdated] = useState<string | null>(null);
   const [launched, setLaunched] = useState<{ type: AdminAgentOperationType; files: number } | null>(null);
   const [satelliteFiles, setSatelliteFiles] = useState<readonly File[]>([]);
@@ -82,25 +83,41 @@ export function AdminIncidentSourcesMediaPage({ fireId }: { readonly fireId: str
     readonly products: number;
     readonly batches: number;
   } | null>(null);
+  const [selectedAnalysisWindowId, setSelectedAnalysisWindowId] = useState<string | null>(null);
   const [now, setNow] = useState(() => Date.now());
+  const availableWindows = operations.kind === 'ready' ? operations.data.available_windows : [];
+  const selectedWindow = operations.kind === 'ready'
+    ? availableWindows.find((window) => window.analysis_window_id === selectedAnalysisWindowId) ?? availableWindows[0]
+    : null;
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => window.clearInterval(timer);
   }, []);
+  useEffect(() => {
+    if (selectedWindow && selectedAnalysisWindowId !== selectedWindow.analysis_window_id) {
+      setSelectedAnalysisWindowId(selectedWindow.analysis_window_id);
+    }
+  }, [selectedAnalysisWindowId, selectedWindow]);
+  useEffect(() => {
+    setSatelliteFiles([]);
+    setSatelliteProgress(0);
+    setSatelliteUploadResult(null);
+    clearSatelliteUploadMutation();
+  }, [clearSatelliteUploadMutation, selectedWindow?.analysis_window_id]);
   const updateSource = async (sourceKey: string, input: Parameters<typeof api.updateSource>[1]) => {
     const result = await mutation.run(`source:${sourceKey}:${JSON.stringify(input)}`, (options) => api.updateSource(sourceKey, input, options));
     if (result !== null) { setUpdated(sourceKey); reload(); }
   };
   const runAnalysis = async (type: AdminAgentOperationType) => {
-    if (operations.kind !== 'ready') return;
-    const result = await analysisMutation.run(`analysis:${fireId}:${operations.data.analysis_window_id}:${type}`, (options) => api.runIncidentAgentOperation(fireId, type, operations.data.analysis_window_id, options));
+    if (operations.kind !== 'ready' || !selectedWindow) return;
+    const result = await analysisMutation.run(`analysis:${fireId}:${selectedWindow.analysis_window_id}:${type}`, (options) => api.runIncidentAgentOperation(fireId, type, selectedWindow.analysis_window_id, options));
     if (result !== null) {
       setLaunched({ type, files: result.queued_files });
       reloadOperations();
     }
   };
   const uploadDailySatelliteProducts = async () => {
-    if (operations.kind !== 'ready' || satelliteFiles.length === 0) return;
+    if (operations.kind !== 'ready' || !selectedWindow || satelliteFiles.length === 0) return;
     setSatelliteProgress(0);
     setSatelliteUploadResult(null);
     const fingerprint = satelliteFiles
@@ -108,11 +125,11 @@ export function AdminIncidentSourcesMediaPage({ fireId }: { readonly fireId: str
       .sort()
       .join('|');
     const result = await satelliteUploadMutation.run(
-      `daily-satellite:${fireId}:${operations.data.analysis_window_id}:${fingerprint}`,
+      `daily-satellite:${fireId}:${selectedWindow.analysis_window_id}:${fingerprint}`,
       (options) => uploadIncidentDailySatellitePackage({
         api,
         fireId,
-        expectedAnalysisWindowId: operations.data.analysis_window_id,
+        expectedAnalysisWindowId: selectedWindow.analysis_window_id,
         files: satelliteFiles,
         requestOptions: options,
         onProgress: setSatelliteProgress,
@@ -139,8 +156,9 @@ export function AdminIncidentSourcesMediaPage({ fireId }: { readonly fireId: str
         <div className="admin-section__heading"><div><h3 id="admin-agent-operations-title">Lancer les analyses</h3><p>Chaque bouton envoie uniquement les lots privés déjà prêts et autorisés. Aucun résultat n’est publié sans validation humaine.</p></div></div>
         {operations.kind === 'loading' ? <AdminLoadingState label="Lecture des analyses disponibles…" /> : null}
         {operations.kind === 'error' ? <AdminErrorState error={operations.error} onRetry={reloadOperations} /> : null}
-        {operations.kind === 'ready' ? <><p><strong>Journée active :</strong> {new Date(`${operations.data.local_date}T12:00:00`).toLocaleDateString('fr-FR')} · état {operations.data.campaign_day_state ?? 'courant'}</p>
-          {operations.data.actions.some((action) => action.operation_type === 'satellite_media' && action.schedule_state === 'required') ? <article className="admin-analysis-action" aria-labelledby="admin-daily-satellite-upload-title">
+        {operations.kind === 'ready' && selectedWindow ? <><p><strong>Fenêtre préparée :</strong> {new Date(`${selectedWindow.local_date}T12:00:00`).toLocaleDateString('fr-FR')} · état {selectedWindow.campaign_day_state ?? 'courant'}</p>
+          {availableWindows.length > 1 ? <label className="admin-field"><span>Fenêtre de la campagne</span><select value={selectedWindow.analysis_window_id} onChange={(event) => setSelectedAnalysisWindowId(event.currentTarget.value)} disabled={analysisMutation.state.pending || satelliteUploadMutation.state.pending}>{availableWindows.map((window) => <option key={window.analysis_window_id} value={window.analysis_window_id}>{new Date(`${window.local_date}T12:00:00`).toLocaleDateString('fr-FR')} · {window.campaign_day_state ?? 'courant'}</option>)}</select><small>La liste provient du manifeste préparé ; aucune date n’est saisie ici.</small></label> : null}
+          {selectedWindow.actions.some((action) => action.operation_type === 'satellite_media' && action.schedule_state === 'required') ? <article className="admin-analysis-action" aria-labelledby="admin-daily-satellite-upload-title">
             <div>
               <h4 id="admin-daily-satellite-upload-title">Ajouter les produits de la journée</h4>
               <p>Choisissez le manifeste préparé avec ses images satellite, vues thermiques ou points chauds. La journée et les métadonnées sont vérifiées automatiquement.</p>
@@ -163,16 +181,16 @@ export function AdminIncidentSourcesMediaPage({ fireId }: { readonly fireId: str
             <div className="admin-analysis-action__footer">
               <span>{satelliteFiles.length ? `${satelliteFiles.length} fichier${satelliteFiles.length > 1 ? 's' : ''} sélectionné${satelliteFiles.length > 1 ? 's' : ''}${satelliteUploadMutation.state.pending ? ` · ${satelliteProgress} %` : ''}` : 'Aucun lot sélectionné'}</span>
               <button type="button" className="button button--primary" disabled={satelliteUploadMutation.state.pending || satelliteFiles.length < 2} onClick={() => void uploadDailySatelliteProducts()}>
-                {satelliteUploadMutation.state.pending ? 'Envoi privé en cours…' : 'Ajouter à la journée active'}
+                {satelliteUploadMutation.state.pending ? 'Envoi privé en cours…' : 'Ajouter à cette fenêtre'}
               </button>
             </div>
             <AdminMutationFeedback
               error={satelliteUploadMutation.state.error}
               succeeded={satelliteUploadMutation.state.succeeded}
-              success={satelliteUploadResult ? `${satelliteUploadResult.products} produit${satelliteUploadResult.products > 1 ? 's' : ''} ajouté${satelliteUploadResult.products > 1 ? 's' : ''} dans ${satelliteUploadResult.batches} lot${satelliteUploadResult.batches > 1 ? 's' : ''} privé${satelliteUploadResult.batches > 1 ? 's' : ''}.` : 'Produits ajoutés à la journée active.'}
+              success={satelliteUploadResult ? `${satelliteUploadResult.products} produit${satelliteUploadResult.products > 1 ? 's' : ''} ajouté${satelliteUploadResult.products > 1 ? 's' : ''} dans ${satelliteUploadResult.batches} lot${satelliteUploadResult.batches > 1 ? 's' : ''} privé${satelliteUploadResult.batches > 1 ? 's' : ''}.` : 'Produits ajoutés à cette fenêtre.'}
             />
           </article> : null}
-          <div className="admin-analysis-actions">{operations.data.actions.map((action) => {
+          <div className="admin-analysis-actions">{selectedWindow.actions.map((action) => {
           const label = ANALYSIS_LABELS[action.operation_type];
           const unavailable = action.blocked_reason === 'operation_declared_absent'
             ? 'Absence déclarée'

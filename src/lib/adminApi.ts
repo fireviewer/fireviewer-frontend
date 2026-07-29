@@ -125,22 +125,33 @@ export interface AdminIncidentBulletinEntry {
 export interface AdminIncidentBulletinEntries { readonly fire_id: string; readonly entries: readonly AdminIncidentBulletinEntry[]; }
 
 export type AdminAgentOperationType = 'user_media' | 'source_research' | 'satellite_media';
+export interface AdminAgentOperationStatus {
+  readonly operation_type: AdminAgentOperationType;
+  readonly schedule_state: 'required' | 'declared_absent' | 'not_scheduled';
+  readonly pending_files: number;
+  readonly pending_analyses: number;
+  readonly running_analyses: number;
+  readonly last_run_at: string | null;
+  readonly can_run: boolean;
+  readonly blocked_reason: 'dispatch_disabled' | 'research_disabled' | 'operation_declared_absent' | 'operation_not_scheduled' | 'input_not_ready' | 'already_completed' | 'already_running' | null;
+}
+
+export interface AdminAgentOperationWindow {
+  readonly analysis_window_id: string;
+  readonly local_date: string;
+  readonly campaign_day_state: 'locked' | 'ready' | 'running' | 'review' | 'published' | 'failed' | null;
+  readonly actions: readonly AdminAgentOperationStatus[];
+}
+
 export interface AdminAgentOperationsOverview {
   readonly fire_id: string;
   readonly episode_id: string;
   readonly analysis_window_id: string;
   readonly local_date: string;
   readonly campaign_day_state: 'locked' | 'ready' | 'running' | 'review' | 'published' | 'failed' | null;
-  readonly actions: readonly {
-    readonly operation_type: AdminAgentOperationType;
-    readonly schedule_state: 'required' | 'declared_absent' | 'not_scheduled';
-    readonly pending_files: number;
-    readonly pending_analyses: number;
-    readonly running_analyses: number;
-    readonly last_run_at: string | null;
-    readonly can_run: boolean;
-    readonly blocked_reason: 'dispatch_disabled' | 'research_disabled' | 'operation_declared_absent' | 'operation_not_scheduled' | 'input_not_ready' | 'already_completed' | 'already_running' | null;
-  }[];
+  readonly actions: readonly AdminAgentOperationStatus[];
+  /** Immutable campaign windows the operator may run for this incident. */
+  readonly available_windows: readonly AdminAgentOperationWindow[];
 }
 
 export interface AdminAgentOperationRunResponse {
@@ -1217,27 +1228,43 @@ function parseOperationalMapSummary(value: unknown): AdminOperationalMapSummary 
   };
 }
 
-function parseAgentOperationsOverview(value: unknown): AdminAgentOperationsOverview {
-  if (!isRecord(value) || !Array.isArray(value.actions)) throw new Error('Commandes IA invalides.');
+function parseAgentOperationStatus(value: unknown): AdminAgentOperationStatus {
+  if (!isRecord(value)) throw new Error('Commande IA invalide.');
   return {
-    fire_id: readString(value.fire_id, 'fire_id', { max: 32 })!,
-    episode_id: readString(value.episode_id, 'episode_id', { max: 128 })!,
+    operation_type: readEnum(value.operation_type, 'operation_type', ['user_media', 'source_research', 'satellite_media'] as const),
+    schedule_state: readEnum(value.schedule_state, 'schedule_state', ['required', 'declared_absent', 'not_scheduled'] as const),
+    pending_files: readNonNegativeInteger(value.pending_files, 'pending_files'),
+    pending_analyses: readNonNegativeInteger(value.pending_analyses, 'pending_analyses'),
+    running_analyses: readNonNegativeInteger(value.running_analyses, 'running_analyses'),
+    last_run_at: value.last_run_at === null ? null : readIsoDate(value.last_run_at, 'last_run_at'),
+    can_run: readBoolean(value.can_run, 'can_run'),
+    blocked_reason: value.blocked_reason === null ? null : readEnum(value.blocked_reason, 'blocked_reason', ['dispatch_disabled', 'research_disabled', 'operation_declared_absent', 'operation_not_scheduled', 'input_not_ready', 'already_completed', 'already_running'] as const),
+  };
+}
+
+function parseAgentOperationWindow(value: unknown): AdminAgentOperationWindow {
+  if (!isRecord(value) || !Array.isArray(value.actions)) throw new Error('Fenêtre d’analyse IA invalide.');
+  return {
     analysis_window_id: readString(value.analysis_window_id, 'analysis_window_id', { max: 128 })!,
     local_date: readString(value.local_date, 'local_date', { max: 10 })!,
     campaign_day_state: value.campaign_day_state === null ? null : readEnum(value.campaign_day_state, 'campaign_day_state', ['locked', 'ready', 'running', 'review', 'published', 'failed'] as const),
-    actions: value.actions.map((item) => {
-      if (!isRecord(item)) throw new Error('Commande IA invalide.');
-      return {
-        operation_type: readEnum(item.operation_type, 'operation_type', ['user_media', 'source_research', 'satellite_media'] as const),
-        schedule_state: readEnum(item.schedule_state, 'schedule_state', ['required', 'declared_absent', 'not_scheduled'] as const),
-        pending_files: readNonNegativeInteger(item.pending_files, 'pending_files'),
-        pending_analyses: readNonNegativeInteger(item.pending_analyses, 'pending_analyses'),
-        running_analyses: readNonNegativeInteger(item.running_analyses, 'running_analyses'),
-        last_run_at: item.last_run_at === null ? null : readIsoDate(item.last_run_at, 'last_run_at'),
-        can_run: readBoolean(item.can_run, 'can_run'),
-        blocked_reason: item.blocked_reason === null ? null : readEnum(item.blocked_reason, 'blocked_reason', ['dispatch_disabled', 'research_disabled', 'operation_declared_absent', 'operation_not_scheduled', 'input_not_ready', 'already_completed', 'already_running'] as const),
-      };
-    }),
+    actions: value.actions.map(parseAgentOperationStatus),
+  };
+}
+
+function parseAgentOperationsOverview(value: unknown): AdminAgentOperationsOverview {
+  if (!isRecord(value) || !Array.isArray(value.actions)) throw new Error('Commandes IA invalides.');
+  const current = parseAgentOperationWindow(value);
+  const availableWindows = value.available_windows === undefined
+    ? [current]
+    : Array.isArray(value.available_windows)
+      ? value.available_windows.map(parseAgentOperationWindow)
+      : (() => { throw new Error('Fenêtres d’analyse IA invalides.'); })();
+  return {
+    fire_id: readString(value.fire_id, 'fire_id', { max: 32 })!,
+    episode_id: readString(value.episode_id, 'episode_id', { max: 128 })!,
+    ...current,
+    available_windows: availableWindows,
   };
 }
 
