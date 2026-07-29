@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { AdminAgentOperationType, AdminIncidentSourcesMediaWorkspace } from '../../lib/adminApi';
+import { uploadIncidentDailySatellitePackage } from '../../lib/dailySatelliteUpload';
 import { useAdminApi, useAdminMutation, useAdminQuery } from './AdminApiContext';
 import { AdminEmptyState, AdminErrorState, AdminLoadingState, AdminMutationFeedback, AdminPageHeader, AdminStateLabel, formatAdminDate } from './AdminPageState';
 import { AdminIncidentWorkspaceNav } from './AdminIncidentWorkspaceNav';
@@ -72,8 +73,15 @@ export function AdminIncidentSourcesMediaPage({ fireId }: { readonly fireId: str
   const { state: operations, reload: reloadOperations } = useAdminQuery(loadOperations, [loadOperations]);
   const mutation = useAdminMutation();
   const analysisMutation = useAdminMutation();
+  const satelliteUploadMutation = useAdminMutation();
   const [updated, setUpdated] = useState<string | null>(null);
   const [launched, setLaunched] = useState<{ type: AdminAgentOperationType; files: number } | null>(null);
+  const [satelliteFiles, setSatelliteFiles] = useState<readonly File[]>([]);
+  const [satelliteProgress, setSatelliteProgress] = useState(0);
+  const [satelliteUploadResult, setSatelliteUploadResult] = useState<{
+    readonly products: number;
+    readonly batches: number;
+  } | null>(null);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1_000);
@@ -91,6 +99,35 @@ export function AdminIncidentSourcesMediaPage({ fireId }: { readonly fireId: str
       reloadOperations();
     }
   };
+  const uploadDailySatelliteProducts = async () => {
+    if (operations.kind !== 'ready' || satelliteFiles.length === 0) return;
+    setSatelliteProgress(0);
+    setSatelliteUploadResult(null);
+    const fingerprint = satelliteFiles
+      .map((file) => `${file.name}:${file.size}:${file.lastModified}`)
+      .sort()
+      .join('|');
+    const result = await satelliteUploadMutation.run(
+      `daily-satellite:${fireId}:${operations.data.analysis_window_id}:${fingerprint}`,
+      (options) => uploadIncidentDailySatellitePackage({
+        api,
+        fireId,
+        expectedAnalysisWindowId: operations.data.analysis_window_id,
+        files: satelliteFiles,
+        requestOptions: options,
+        onProgress: setSatelliteProgress,
+      }),
+    );
+    if (result !== null) {
+      setSatelliteUploadResult({
+        products: Math.max(0, result.item_count - 1),
+        batches: result.batch_ids.length,
+      });
+      setSatelliteFiles([]);
+      setSatelliteProgress(100);
+      reloadOperations();
+    }
+  };
 
   if (state.kind === 'loading') return <AdminLoadingState label="Chargement des sources et médias…" />;
   if (state.kind === 'error') return <AdminErrorState error={state.error} onRetry={reload} />;
@@ -102,7 +139,40 @@ export function AdminIncidentSourcesMediaPage({ fireId }: { readonly fireId: str
         <div className="admin-section__heading"><div><h3 id="admin-agent-operations-title">Lancer les analyses</h3><p>Chaque bouton envoie uniquement les lots privés déjà prêts et autorisés. Aucun résultat n’est publié sans validation humaine.</p></div></div>
         {operations.kind === 'loading' ? <AdminLoadingState label="Lecture des analyses disponibles…" /> : null}
         {operations.kind === 'error' ? <AdminErrorState error={operations.error} onRetry={reloadOperations} /> : null}
-        {operations.kind === 'ready' ? <><p><strong>Journée active :</strong> {new Date(`${operations.data.local_date}T12:00:00`).toLocaleDateString('fr-FR')} · état {operations.data.campaign_day_state ?? 'courant'}</p><div className="admin-analysis-actions">{operations.data.actions.map((action) => {
+        {operations.kind === 'ready' ? <><p><strong>Journée active :</strong> {new Date(`${operations.data.local_date}T12:00:00`).toLocaleDateString('fr-FR')} · état {operations.data.campaign_day_state ?? 'courant'}</p>
+          {operations.data.actions.some((action) => action.operation_type === 'satellite_media' && action.schedule_state === 'required') ? <article className="admin-analysis-action" aria-labelledby="admin-daily-satellite-upload-title">
+            <div>
+              <h4 id="admin-daily-satellite-upload-title">Ajouter les produits de la journée</h4>
+              <p>Choisissez le manifeste préparé avec ses images satellite, vues thermiques ou points chauds. La journée et les métadonnées sont vérifiées automatiquement.</p>
+            </div>
+            <label className="admin-field">
+              <span>Fichiers du lot quotidien</span>
+              <input
+                type="file"
+                multiple
+                accept=".json,.geojson,.png,.jpg,.jpeg,.tif,.tiff,application/json,image/png,image/jpeg,image/tiff"
+                disabled={satelliteUploadMutation.state.pending}
+                onChange={(event) => {
+                  setSatelliteFiles(Array.from(event.currentTarget.files ?? []));
+                  setSatelliteProgress(0);
+                  setSatelliteUploadResult(null);
+                  satelliteUploadMutation.clear();
+                }}
+              />
+            </label>
+            <div className="admin-analysis-action__footer">
+              <span>{satelliteFiles.length ? `${satelliteFiles.length} fichier${satelliteFiles.length > 1 ? 's' : ''} sélectionné${satelliteFiles.length > 1 ? 's' : ''}${satelliteUploadMutation.state.pending ? ` · ${satelliteProgress} %` : ''}` : 'Aucun lot sélectionné'}</span>
+              <button type="button" className="button button--primary" disabled={satelliteUploadMutation.state.pending || satelliteFiles.length < 2} onClick={() => void uploadDailySatelliteProducts()}>
+                {satelliteUploadMutation.state.pending ? 'Envoi privé en cours…' : 'Ajouter à la journée active'}
+              </button>
+            </div>
+            <AdminMutationFeedback
+              error={satelliteUploadMutation.state.error}
+              succeeded={satelliteUploadMutation.state.succeeded}
+              success={satelliteUploadResult ? `${satelliteUploadResult.products} produit${satelliteUploadResult.products > 1 ? 's' : ''} ajouté${satelliteUploadResult.products > 1 ? 's' : ''} dans ${satelliteUploadResult.batches} lot${satelliteUploadResult.batches > 1 ? 's' : ''} privé${satelliteUploadResult.batches > 1 ? 's' : ''}.` : 'Produits ajoutés à la journée active.'}
+            />
+          </article> : null}
+          <div className="admin-analysis-actions">{operations.data.actions.map((action) => {
           const label = ANALYSIS_LABELS[action.operation_type];
           const unavailable = action.blocked_reason === 'operation_declared_absent'
             ? 'Absence déclarée'

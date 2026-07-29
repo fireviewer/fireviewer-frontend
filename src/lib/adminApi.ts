@@ -478,6 +478,26 @@ export interface AdminBlobUploadGrant {
   readonly allowed_content_types: readonly string[];
 }
 
+export interface AdminDailySatellitePackageOpen extends AdminBlobUploadGrant {
+  readonly package_id: string;
+}
+
+export interface AdminDailySatellitePackageResult {
+  readonly package_id: string;
+  readonly package_kind: 'ADMIN_SATELLITE';
+  readonly fire_id: string;
+  readonly episode_id: string;
+  readonly state: 'CONVERTED';
+  readonly known_start_date: string;
+  readonly known_end_date: string;
+  readonly analysis_authorized: true;
+  readonly publication_authorized: false;
+  readonly purge_after: string;
+  readonly finalized_at: string;
+  readonly batch_ids: readonly string[];
+  readonly item_count: number;
+}
+
 export interface AdminBlobObjectReference {
   readonly path: string;
   readonly pathname: string;
@@ -898,6 +918,57 @@ function parseIncidentGalleryItem(value: unknown): AdminIncidentGalleryItem {
     proposed_by: readString(value.proposed_by, 'proposed_by', { max: 255 })!, proposed_at: readIsoDate(value.proposed_at, 'proposed_at'),
     reviewed_by: readString(value.reviewed_by, 'reviewed_by', { nullable: true, max: 255 }), reviewed_at: nullableIso('reviewed_at'),
     review_reason: readString(value.review_reason, 'review_reason', { nullable: true, max: 500 }), version: readPositiveInteger(value.version, 'version'),
+  };
+}
+
+function parseDailySatellitePackageOpen(value: unknown): AdminDailySatellitePackageOpen {
+  if (!isRecord(value) || !hasExactKeys(value, ['package_id', 'upload_id', 'pathname_prefix', 'upload_grant', 'expires_at', 'maximum_file_size_bytes', 'allowed_content_types'])) {
+    throw new Error('Autorisation d’envoi des produits quotidiens invalide.');
+  }
+  return {
+    package_id: readString(value.package_id, 'package_id', { max: 128 })!,
+    ...parseBlobUploadGrant({
+      upload_id: value.upload_id,
+      pathname_prefix: value.pathname_prefix,
+      upload_grant: value.upload_grant,
+      expires_at: value.expires_at,
+      maximum_file_size_bytes: value.maximum_file_size_bytes,
+      allowed_content_types: value.allowed_content_types,
+    }),
+  };
+}
+
+function parseDailySatellitePackageResult(value: unknown): AdminDailySatellitePackageResult {
+  if (
+    !isRecord(value)
+    || !hasExactKeys(value, ['package_id', 'package_kind', 'fire_id', 'episode_id', 'state', 'known_start_date', 'known_end_date', 'location_hint', 'analysis_authorized', 'publication_authorized', 'purge_after', 'finalized_at', 'batch_ids', 'items'])
+    || !Array.isArray(value.batch_ids)
+    || !Array.isArray(value.items)
+  ) {
+    throw new Error('Résultat d’envoi des produits quotidiens invalide.');
+  }
+  const analysisAuthorized = readBoolean(value.analysis_authorized, 'analysis_authorized');
+  const publicationAuthorized = readBoolean(
+    value.publication_authorized,
+    'publication_authorized',
+  );
+  if (!analysisAuthorized || publicationAuthorized) {
+    throw new Error('Le lot quotidien ne respecte pas le contrat privé.');
+  }
+  return {
+    package_id: readString(value.package_id, 'package_id', { max: 128 })!,
+    package_kind: readEnum(value.package_kind, 'package_kind', ['ADMIN_SATELLITE'] as const),
+    fire_id: readString(value.fire_id, 'fire_id', { max: 32 })!,
+    episode_id: readString(value.episode_id, 'episode_id', { max: 128 })!,
+    state: readEnum(value.state, 'state', ['CONVERTED'] as const),
+    known_start_date: readIsoDate(value.known_start_date, 'known_start_date').slice(0, 10),
+    known_end_date: readIsoDate(value.known_end_date, 'known_end_date').slice(0, 10),
+    analysis_authorized: analysisAuthorized,
+    publication_authorized: publicationAuthorized,
+    purge_after: readIsoDate(value.purge_after, 'purge_after'),
+    finalized_at: readIsoDate(value.finalized_at, 'finalized_at'),
+    batch_ids: value.batch_ids.map((item) => readString(item, 'batch_id', { max: 128 })!),
+    item_count: value.items.length,
   };
 }
 
@@ -2090,6 +2161,57 @@ export class AdminApiClient {
     } catch {
       throw new AdminApiError('parse', 'Le lancement de l’analyse IA est invalide.');
     }
+  }
+
+  async openIncidentDailySatellitePackage(
+    fireId: string,
+    expectedAnalysisWindowId: string,
+    fileCount: number,
+    totalSizeBytes: number,
+    options: AdminRequestOptions,
+  ): Promise<AdminDailySatellitePackageOpen> {
+    if (
+      !/^FR-[0-9A-Z]{2,3}-[0-9]{5}$/.test(fireId)
+      || !expectedAnalysisWindowId
+      || !Number.isSafeInteger(fileCount)
+      || fileCount < 2
+      || !Number.isSafeInteger(totalSizeBytes)
+      || totalSizeBytes < 1
+    ) {
+      throw new AdminApiError('configuration', 'Le lot de produits quotidiens est invalide.');
+    }
+    const payload = await this.postJsonV2(
+      `/agent-batches/incidents/${encodeURIComponent(fireId)}/daily-inputs/satellite/open`,
+      {
+        expected_analysis_window_id: expectedAnalysisWindowId,
+        file_count: fileCount,
+        total_size_bytes: totalSizeBytes,
+      },
+      options,
+    );
+    try { return parseDailySatellitePackageOpen(payload); }
+    catch { throw new AdminApiError('parse', 'L’autorisation d’envoi des produits quotidiens est invalide.'); }
+  }
+
+  async finalizeIncidentDailySatellitePackage(
+    packageId: string,
+    options: AdminRequestOptions = {},
+  ): Promise<AdminDailySatellitePackageResult> {
+    if (!packageId || packageId.length > 128) {
+      throw new AdminApiError('configuration', 'Identifiant de lot quotidien invalide.');
+    }
+    const payload = await this.requestV2(
+      `/agent-batches/source-packages/${encodeURIComponent(packageId)}/finalize`,
+      {
+        method: 'POST',
+        headers: options.idempotencyKey
+          ? { 'Idempotency-Key': options.idempotencyKey }
+          : undefined,
+      },
+      options,
+    );
+    try { return parseDailySatellitePackageResult(payload); }
+    catch { throw new AdminApiError('parse', 'Le résultat de l’envoi des produits quotidiens est invalide.'); }
   }
 
   async getIncidentModelsPipeline(fireId: string, options: AdminRequestOptions = {}): Promise<AdminIncidentModelsPipelineWorkspace> {

@@ -352,6 +352,69 @@ describe('client API d’administration', () => {
     expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({ expected_analysis_window_id: 'window-20260712' });
   });
 
+  it('ouvre puis finalise un lot satellite lié uniquement à la fenêtre active', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', API_ORIGIN);
+    const opened = {
+      package_id: 'SP-fontainebleau-20260712',
+      upload_id: 'a'.repeat(32),
+      pathname_prefix: `firewarning/source-packages/${'a'.repeat(32)}`,
+      upload_grant: 'grant-signe',
+      expires_at: '2026-07-12T23:00:00Z',
+      maximum_file_size_bytes: 100_000_000,
+      allowed_content_types: ['application/json', 'image/png'],
+    };
+    const finalized = {
+      package_id: opened.package_id,
+      package_kind: 'ADMIN_SATELLITE',
+      fire_id: 'FR-77-00001',
+      episode_id: 'E01',
+      state: 'CONVERTED',
+      known_start_date: '2026-07-12',
+      known_end_date: '2026-07-12',
+      location_hint: null,
+      analysis_authorized: true,
+      publication_authorized: false,
+      purge_after: '2026-08-12T23:00:00Z',
+      finalized_at: '2026-07-12T20:00:00Z',
+      batch_ids: ['batch-satellite-1'],
+      items: [
+        { item_id: 'SPI-manifest', original_filename: 'fireviewer-satellite-manifest.json' },
+        { item_id: 'SPI-image', original_filename: 'sentinel.png' },
+      ],
+    };
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(response(opened))
+      .mockResolvedValueOnce(response(finalized));
+    const client = new AdminApiClient({ session: SESSION, fetchImpl: fetchMock });
+
+    await expect(client.openIncidentDailySatellitePackage(
+      'FR-77-00001',
+      'window-20260712',
+      2,
+      2048,
+      { idempotencyKey: 'satellite-upload-1' },
+    )).resolves.toMatchObject({ package_id: opened.package_id });
+    await expect(client.finalizeIncidentDailySatellitePackage(
+      opened.package_id,
+      { idempotencyKey: 'satellite-upload-1' },
+    )).resolves.toMatchObject({
+      package_kind: 'ADMIN_SATELLITE',
+      publication_authorized: false,
+      item_count: 2,
+      batch_ids: ['batch-satellite-1'],
+    });
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      `${API_ORIGIN}/api/v2/admin/agent-batches/incidents/FR-77-00001/daily-inputs/satellite/open`,
+      `${API_ORIGIN}/api/v2/admin/agent-batches/source-packages/${opened.package_id}/finalize`,
+    ]);
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      expected_analysis_window_id: 'window-20260712',
+      file_count: 2,
+      total_size_bytes: 2048,
+    });
+  });
+
   it('charge les trois projections spécialisées d’un fire_id et met à jour une source via l’API opérateur', async () => {
     vi.stubEnv('VITE_API_BASE_URL', API_ORIGIN);
     const fetchMock = vi.fn<typeof fetch>()
