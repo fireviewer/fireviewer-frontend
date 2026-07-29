@@ -6,7 +6,7 @@ import type { ViewerManifestStatusCode, ViewerManifestSummary } from '../../lib/
 import { IncidentGlbViewer } from './IncidentGlbViewer';
 import { PublicEmergencyNotice } from './FireWarningPublicShell';
 import { PublicIcon, type PublicIconName } from './PublicIcon';
-import type { TiledSceneViewPreset } from './TiledSpatialScene3D';
+import type { TiledSceneViewPreset, TiledSceneWgs84Line } from './TiledSpatialScene3D';
 import incidentsHero from '../../assets/public/fire-hero-incidents.jpg';
 import './public-incident.css';
 
@@ -19,7 +19,7 @@ const STATUS: Record<ViewerManifestStatusCode, string> = { CANDIDATE: 'À vérif
 const VERIFICATION: Record<PublicIncidentView['verification'], string> = { verified: 'Vérifiée', corroborated: 'Recoupée', review_required: 'À revoir' };
 const RESOURCE_KIND: Record<NonNullable<PublicIncidentView['official_resources']>[number]['kind'], string> = { safety: 'Consignes', press: 'Point presse', official_update: 'Mise à jour', authority: 'Service officiel' };
 const FACT_CATEGORY: Record<string, string> = { fire_activity: 'Activité du feu', burned_area: 'Surface touchée', resources: 'Moyens engagés', evacuation: 'Évacuations', access: 'Accès', infrastructure: 'Infrastructures', weather: 'Météo', other: 'Autre information' };
-const SPATIAL_KIND: Record<NonNullable<PublicIncidentView['daily_intelligence']>[number]['spatial_results'][number]['kind'], string> = { active_fire_point: 'Point actif', smoke_origin_point: 'Origine probable de fumée', visible_fire_front: 'Front visible', probable_activity_envelope: 'Zone probable d’activité', burned_area_polygon: 'Surface brûlée' };
+const SPATIAL_KIND: Record<NonNullable<PublicIncidentView['daily_intelligence']>[number]['spatial_results'][number]['kind'], string> = { active_fire_point: 'Point actif', smoke_origin_point: 'Origine probable de fumée', visible_fire_front: 'Front visible', probable_activity_envelope: 'Zone probable d’activité', burned_area_polygon: 'Zone parcourue' };
 
 function date(value: string | null | undefined): string {
   if (!value || !Number.isFinite(Date.parse(value))) return 'Non publiée';
@@ -130,6 +130,19 @@ function IncidentActions({ fireId }: { readonly fireId: string }) {
   return <section className="fw-incident-actions" aria-label="Actions utiles"><div><PublicIcon name="phone" size={23} /><div><h2>Besoin d’une aide immédiate ?</h2><p>En cas de danger ou de personnes menacées, contactez les secours.</p></div></div><div className="fw-incident-actions__buttons"><a className="fw-button fw-button--outline" href="tel:18">Appeler le 18</a><a className="fw-button fw-button--outline" href="tel:112">Appeler le 112</a><a className="fw-button fw-button--primary" href={`/incendie/${fireId}/ajouter-preuve`}><PublicIcon name="plus-circle" size={17} />Ajouter une preuve</a></div></section>;
 }
 
+function polygonBoundaries(geometry: Readonly<Record<string, unknown>>, color: string): readonly TiledSceneWgs84Line[] {
+  const point = (value: unknown): readonly [number, number] | null => Array.isArray(value) && typeof value[0] === 'number' && Number.isFinite(value[0]) && typeof value[1] === 'number' && Number.isFinite(value[1]) ? [value[0], value[1]] : null;
+  const ring = (value: unknown): readonly (readonly [number, number])[] | null => {
+    if (!Array.isArray(value)) return null;
+    const points = value.map(point);
+    return points.every((item): item is readonly [number, number] => item !== null) && points.length >= 3 ? points : null;
+  };
+  const coordinates = geometry.coordinates;
+  if (geometry.type === 'Polygon' && Array.isArray(coordinates)) return coordinates.flatMap((item) => { const value = ring(item); return value ? [{ points: value, color }] : []; });
+  if (geometry.type === 'MultiPolygon' && Array.isArray(coordinates)) return coordinates.flatMap((polygon) => Array.isArray(polygon) ? polygon.flatMap((item) => { const value = ring(item); return value ? [{ points: value, color }] : []; }) : []);
+  return [];
+}
+
 function MapPanel({ view, summary, onClose }: { readonly view: PublicIncidentView | null; readonly summary: ViewerManifestSummary; readonly onClose: () => void }) {
   const [lowData, setLowData] = useState(() => localStorage.getItem('firewarning-low-data') === 'true');
   const [open3d, setOpen3d] = useState(false);
@@ -137,8 +150,20 @@ function MapPanel({ view, summary, onClose }: { readonly view: PublicIncidentVie
   const [sceneLoading, setSceneLoading] = useState(false);
   const [sceneError, setSceneError] = useState(false);
   const [preset, setPreset] = useState<TiledSceneViewPreset>('near');
+  const [selectedAnalysisId, setSelectedAnalysisId] = useState<string | null>(null);
   const hasSpatial = summary.modelState === 'available' && Boolean(summary.asset || summary.scene);
   const tiledSource = useMemo(() => !scene ? null : { catalogUrl: new URL(scene.catalog_url, getViewerManifestApiOrigin() ?? window.location.origin).toString(), files: Object.fromEntries(scene.files.map((file) => [file.path, new URL(file.url, getViewerManifestApiOrigin() ?? window.location.origin).toString()])) }, [scene]);
+  const analysisDays = useMemo(() => [...(view?.daily_intelligence ?? [])].sort((left, right) => left.local_date.localeCompare(right.local_date)), [view]);
+  const selectedDay = analysisDays.find((item) => item.analysis_id === selectedAnalysisId) ?? analysisDays.at(-1) ?? null;
+  const mapLayers = useMemo(() => {
+    const activeZones = view?.active_fire_zones ?? (view?.active_fire_zone ? [view.active_fire_zone] : []);
+    const activeForDay = selectedDay ? activeZones.filter((item) => item.analysis_id === selectedDay.analysis_id) : activeZones.slice(-1);
+    const burnedForDay = selectedDay?.spatial_results.filter((item) => item.kind === 'burned_area_polygon') ?? [];
+    return [
+      ...burnedForDay.flatMap((item) => polygonBoundaries(item.geometry_geojson, '#dc5b35')),
+      ...activeForDay.flatMap((item) => polygonBoundaries(item.geometry_geojson, '#ffca3a')),
+    ];
+  }, [selectedDay, view]);
   const setLow = () => setLowData((value) => { localStorage.setItem('firewarning-low-data', String(!value)); return !value; });
   const openSpatialView = async () => {
     if (summary.asset || scene) {
@@ -157,7 +182,7 @@ function MapPanel({ view, summary, onClose }: { readonly view: PublicIncidentVie
       setSceneLoading(false);
     }
   };
-  return <div className="fw-map-panel-backdrop" role="presentation"><aside className="fw-map-panel" role="dialog" aria-modal="true" aria-label="Carte"><header><div><span>Carte</span><h2>{view?.canonical_name ?? `Incident ${summary.fireId}`}</h2></div><button type="button" onClick={onClose} aria-label="Fermer la carte"><PublicIcon name="close" size={22} /></button></header><div className="fw-map-panel__body">{!hasSpatial ? <EmptySection title="Aucune carte publiée" text="Cette fiche peut être consultée sans carte, périmètre ni représentation 3D." icon="map" /> : lowData ? <><div className="fw-map-panel__tools"><button type="button" onClick={setLow}><PublicIcon name="data" size={17} />Activer la vue 3D</button></div><EmptySection title="Vue 3D désactivée" text="Le mode faible connexion laisse la situation et l’évolution accessibles." icon="data" /></> : !open3d ? <><div className="fw-map-panel__tools"><button type="button" onClick={setLow}><PublicIcon name="data" size={17} />Faible connexion</button></div><section className="fw-viewer-fallback"><PublicIcon name="map" size={30} /><h2>Vue 3D à la demande</h2><p>Le catalogue et les tuiles ne seront chargés qu’après votre action.</p>{sceneError ? <p role="alert">La scène 3D n’a pas pu être préparée.</p> : null}<button className="fw-button fw-button--primary" type="button" disabled={sceneLoading} onClick={() => void openSpatialView()}>{sceneLoading ? 'Préparation de la vue 3D…' : 'Ouvrir la vue 3D'} {!sceneLoading ? <PublicIcon name="arrow" size={16} /> : null}</button></section></> : <div className="fw-incident-viewer"><div className="fw-viewer-distance" aria-label="Distance de la représentation">{([['near', 'Zone proche'], ['local', 'Secteur local'], ['extended', 'Vue étendue']] as const).map(([id, label]) => <button key={id} className={preset === id ? 'is-active' : undefined} type="button" onClick={() => setPreset(id)}>{label}</button>)}</div>{tiledSource ? <Suspense fallback={<div className="incident-tiled-scene__loading" role="status">Préparation de la vue 3D…</div>}><TiledSpatialScene3D source={tiledSource} overlayOriginWgs84={summary.frame?.origin_wgs84} viewPreset={preset} /></Suspense> : summary.asset ? <IncidentGlbViewer assetUrl={summary.asset.url} version={summary.asset.version} sha256={summary.asset.sha256} frame={summary.frame} terrainSourceYear={summary.freshness.terrain_source_year} observations={view?.observations ?? []} /> : null}</div>}</div></aside></div>;
+  return <div className="fw-map-panel-backdrop" role="presentation"><aside className="fw-map-panel" role="dialog" aria-modal="true" aria-label="Carte"><header><div><span>Carte</span><h2>{view?.canonical_name ?? `Incident ${summary.fireId}`}</h2></div><button type="button" onClick={onClose} aria-label="Fermer la carte"><PublicIcon name="close" size={22} /></button></header><div className="fw-map-panel__body">{!hasSpatial ? <EmptySection title="Aucune carte publiée" text="Cette fiche peut être consultée sans carte, périmètre ni représentation 3D." icon="map" /> : lowData ? <><div className="fw-map-panel__tools"><button type="button" onClick={setLow}><PublicIcon name="data" size={17} />Activer la vue 3D</button></div><EmptySection title="Vue 3D désactivée" text="Le mode faible connexion laisse la situation et l’évolution accessibles." icon="data" /></> : !open3d ? <><div className="fw-map-panel__tools"><button type="button" onClick={setLow}><PublicIcon name="data" size={17} />Faible connexion</button></div><section className="fw-viewer-fallback"><PublicIcon name="map" size={30} /><h2>Vue 3D à la demande</h2><p>Le catalogue et les tuiles ne seront chargés qu’après votre action.</p>{sceneError ? <p role="alert">La scène 3D n’a pas pu être préparée.</p> : null}<button className="fw-button fw-button--primary" type="button" disabled={sceneLoading} onClick={() => void openSpatialView()}>{sceneLoading ? 'Préparation de la vue 3D…' : 'Ouvrir la vue 3D'} {!sceneLoading ? <PublicIcon name="arrow" size={16} /> : null}</button></section></> : <div className="fw-incident-viewer"><div className="fw-viewer-distance" aria-label="Distance de la représentation">{([['near', 'Zone proche'], ['local', 'Secteur local'], ['extended', 'Vue étendue']] as const).map(([id, label]) => <button key={id} className={preset === id ? 'is-active' : undefined} type="button" onClick={() => setPreset(id)}>{label}</button>)}</div>{analysisDays.length ? <div className="fw-map-panel__tools"><label>Journée <select value={selectedDay?.analysis_id ?? ''} onChange={(event) => setSelectedAnalysisId(event.target.value || null)}>{analysisDays.map((item) => <option key={item.analysis_id} value={item.analysis_id}>{day(item.local_date)}</option>)}</select></label><span><i style={{ color: '#dc5b35' }}>●</i> Zone parcourue</span><span><i style={{ color: '#ffca3a' }}>●</i> Zone active</span></div> : null}{tiledSource ? <Suspense fallback={<div className="incident-tiled-scene__loading" role="status">Préparation de la vue 3D…</div>}><TiledSpatialScene3D source={tiledSource} overlayOriginWgs84={summary.frame?.origin_wgs84} viewPreset={preset} overlayWgs84Lines={mapLayers} /></Suspense> : summary.asset ? <IncidentGlbViewer assetUrl={summary.asset.url} version={summary.asset.version} sha256={summary.asset.sha256} frame={summary.frame} terrainSourceYear={summary.freshness.terrain_source_year} observations={view?.observations ?? []} /> : null}</div>}</div></aside></div>;
 }
 
 export function PublicIncidentRealPage({ summary, checkedAt: _checkedAt, stale, refreshing, onRefresh, detailRequest, emptyPreview = false, demoLabel }: { readonly summary: ViewerManifestSummary; readonly checkedAt: string; readonly stale: boolean; readonly refreshing: boolean; readonly onRefresh: () => void; readonly detailRequest?: Promise<{ readonly view: PublicIncidentView | null; readonly error: unknown | null }>; readonly emptyPreview?: boolean; readonly demoLabel?: string }) {

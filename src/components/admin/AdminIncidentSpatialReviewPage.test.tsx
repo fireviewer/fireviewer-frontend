@@ -17,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   changePublication: vi.fn(async () => ({})),
   reviewFact: vi.fn(async () => ({})),
   reviewReport: vi.fn(async () => ({})),
+  createZone: vi.fn(async () => ({})),
 }));
 
 vi.mock('./AdminApiContext', () => ({
@@ -27,6 +28,7 @@ vi.mock('./AdminApiContext', () => ({
     changePublication: mocks.changePublication,
     reviewIncidentAgentFact: mocks.reviewFact,
     reviewIncidentSituationReport: mocks.reviewReport,
+    createActiveFireZoneRevision: mocks.createZone,
   }),
   useAdminQuery: () => ({
     state: {
@@ -164,6 +166,27 @@ describe('outils de revue spatiale 3D', () => {
       expect.objectContaining({ idempotencyKey: expect.stringMatching(/^project-map-publish-/) }),
     );
     expect(await screen.findByText('Carte publiée sur le site public.')).toBeVisible();
+  });
+
+  it('rattache le calque dessiné à la journée d’analyse sélectionnée', async () => {
+    const user = userEvent.setup();
+    render(<AdminIncidentSpatialReviewPage fireId="FR-99-00001" />);
+
+    await user.selectOptions(screen.getByLabelText('Journée du calque'), 'ANALYSIS-2026-07-12');
+    await user.click(screen.getByRole('button', { name: 'Tracer un nouveau contour' }));
+    await user.click(screen.getByRole('button', { name: 'Cliquer le relief' }));
+    await user.click(screen.getByRole('button', { name: 'Cliquer le relief' }));
+    await user.click(screen.getByRole('button', { name: 'Cliquer le relief' }));
+    await user.click(screen.getByRole('button', { name: 'Enregistrer le calque' }));
+
+    expect(mocks.createZone).toHaveBeenCalledWith(
+      'FR-99-00001',
+      expect.objectContaining({
+        analysis_id: 'ANALYSIS-2026-07-12',
+        valid_at: '2026-07-12T23:59:59.999Z',
+      }),
+      expect.objectContaining({ idempotencyKey: expect.stringMatching(/^active-zone-/) }),
+    );
   });
 
   it('valide les faits et le rapport consolidé dans la revue existante', async () => {

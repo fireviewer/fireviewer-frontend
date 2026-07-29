@@ -56,6 +56,7 @@ export interface TiledSceneSource {
 
 export interface TiledScenePoint { readonly position: readonly [number, number, number]; readonly color: string; }
 export interface TiledSceneLine { readonly points: readonly (readonly [number, number, number])[]; readonly color: string; }
+export interface TiledSceneWgs84Line { readonly points: readonly (readonly [number, number])[]; readonly color: string; }
 export type TiledSceneViewPreset = 'near' | 'local' | 'extended';
 
 interface Runtime {
@@ -306,6 +307,17 @@ function overlayWorld(origin: UnityOrigin, point: readonly [number, number, numb
   return new Vector3(point[0], point[2], point[1] + lift);
 }
 
+function projectWgs84OverlayLines(origin: UnityOrigin, lines: readonly TiledSceneWgs84Line[]): readonly TiledSceneLine[] {
+  return lines.flatMap((line) => {
+    const points = line.points.flatMap((point) => {
+      if (!Number.isFinite(point[0]) || !Number.isFinite(point[1])) return [];
+      const projected = proj4('EPSG:4326', 'EPSG:2154', [point[0], point[1]]) as [number, number];
+      return [[projected[0] - origin[0], 0, -(projected[1] - origin[1])] as const];
+    });
+    return points.length >= 2 ? [{ points, color: line.color }] : [];
+  });
+}
+
 function redrawOverlays(runtime: Runtime, points: readonly TiledScenePoint[], lines: readonly TiledSceneLine[]): void {
   disposeObject(runtime.overlays); runtime.overlays.clear();
   for (const item of points) {
@@ -346,6 +358,7 @@ export function TiledSpatialScene3D({
   viewPreset = 'near',
   overlayPoints = [],
   overlayLines = [],
+  overlayWgs84Lines = [],
 }: {
   readonly source: TiledSceneSource;
   readonly overlayOriginWgs84?: readonly [number, number, number];
@@ -355,16 +368,17 @@ export function TiledSpatialScene3D({
   readonly viewPreset?: TiledSceneViewPreset;
   readonly overlayPoints?: readonly TiledScenePoint[];
   readonly overlayLines?: readonly TiledSceneLine[];
+  readonly overlayWgs84Lines?: readonly TiledSceneWgs84Line[];
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const runtimeRef = useRef<Runtime | null>(null);
   const [detailLodEnabled, setDetailLodEnabled] = useState(true);
-  const propsRef = useRef({ overlayPoints, overlayLines, onPick, drawMode, cameraMode, detailLodEnabled, viewPreset });
+  const propsRef = useRef({ overlayPoints, overlayLines, overlayWgs84Lines, onPick, drawMode, cameraMode, detailLodEnabled, viewPreset });
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [detailState, setDetailState] = useState({ active: 0, expected: 0, failures: 0 });
-  propsRef.current = { overlayPoints, overlayLines, onPick, drawMode, cameraMode, detailLodEnabled, viewPreset };
+  propsRef.current = { overlayPoints, overlayLines, overlayWgs84Lines, onPick, drawMode, cameraMode, detailLodEnabled, viewPreset };
 
-  useEffect(() => { const runtime = runtimeRef.current; if (runtime) redrawOverlays(runtime, overlayPoints, overlayLines); }, [overlayPoints, overlayLines]);
+  useEffect(() => { const runtime = runtimeRef.current; if (runtime) redrawOverlays(runtime, overlayPoints, [...overlayLines, ...projectWgs84OverlayLines(runtime.origin, overlayWgs84Lines)]); }, [overlayPoints, overlayLines, overlayWgs84Lines]);
   useEffect(() => { const runtime = runtimeRef.current; if (runtime) frameCamera(runtime, viewPreset); }, [viewPreset]);
   useEffect(() => { runtimeRef.current?.refreshDetails(); }, [detailLodEnabled]);
 
@@ -600,7 +614,7 @@ export function TiledSpatialScene3D({
         farRoot = far.root; farRoot.position.z = -3; farTerrain = far.terrain; terrainMeshes.push(far.terrain); await instance.add(farRoot);
         const overlays = new Group(); overlays.name = 'admin-spatial-overlays'; await instance.add(overlays);
         const runtime: Runtime = { instance, controls, overlays, origin: catalog.origin_l93_m, catalog, refreshDetails: scheduleRefresh };
-        runtimeRef.current = runtime; redrawOverlays(runtime, propsRef.current.overlayPoints, propsRef.current.overlayLines);
+        runtimeRef.current = runtime; redrawOverlays(runtime, propsRef.current.overlayPoints, [...propsRef.current.overlayLines, ...projectWgs84OverlayLines(runtime.origin, propsRef.current.overlayWgs84Lines)]);
         let focus: readonly [number, number] | undefined;
         if (overlayOriginWgs84) focus = proj4('EPSG:4326', 'EPSG:2154', [overlayOriginWgs84[0], overlayOriginWgs84[1]]) as [number, number];
         frameCamera(runtime, propsRef.current.viewPreset, focus); scheduleRefresh(); setStatus('ready');

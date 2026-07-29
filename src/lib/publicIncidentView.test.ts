@@ -80,11 +80,22 @@ describe('loadPublicIncidentView', () => {
         zone_revision_id: 'AZR-1',
         revision: 1,
         valid_at: '2026-07-15T10:00:00Z',
+        analysis_id: 'analysis-2026-07-15',
         geometry_geojson: {
           type: 'MultiPolygon',
           coordinates: [[[[6.1, 43.2], [6.2, 43.2], [6.1, 43.2]]]],
         },
       },
+      active_fire_zones: [{
+        zone_revision_id: 'AZR-1',
+        revision: 1,
+        valid_at: '2026-07-15T10:00:00Z',
+        analysis_id: 'analysis-2026-07-15',
+        geometry_geojson: {
+          type: 'MultiPolygon',
+          coordinates: [[[[6.1, 43.2], [6.2, 43.2], [6.1, 43.2]]]],
+        },
+      }],
       daily_intelligence: [{
         analysis_id: 'analysis-2026-07-15',
         episode_id: 'E01',
@@ -174,5 +185,6 @@ describe('loadPublicIncidentView', () => {
     });
     expect(view.map_gallery?.[0]?.capture_id).toBe('CAPTURE-1');
     expect(view.active_fire_zone?.zone_revision_id).toBe('AZR-1');
+    expect(view.active_fire_zones?.[0]?.analysis_id).toBe('analysis-2026-07-15');
   });
 });
