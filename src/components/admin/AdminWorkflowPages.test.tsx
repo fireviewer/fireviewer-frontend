@@ -275,7 +275,7 @@ describe('pages de workflow administrateur', () => {
       public_transformations: ['recadrage'],
       reason: 'Registre source mis à jour manuellement depuis la fiche incident.',
     });
-    expect(screen.queryByLabelText('Fichiers du lot quotidien')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Fichiers du lot quotidien')).toBeInTheDocument();
   });
 
   it('dépose toutes les sources sans choisir de date puis affiche le classement quotidien', async () => {
