@@ -104,15 +104,21 @@ export function AdminIncidentSourcesMediaPage({ fireId }: { readonly fireId: str
         {operations.kind === 'error' ? <AdminErrorState error={operations.error} onRetry={reloadOperations} /> : null}
         {operations.kind === 'ready' ? <><p><strong>Journée active :</strong> {new Date(`${operations.data.local_date}T12:00:00`).toLocaleDateString('fr-FR')} · état {operations.data.campaign_day_state ?? 'courant'}</p><div className="admin-analysis-actions">{operations.data.actions.map((action) => {
           const label = ANALYSIS_LABELS[action.operation_type];
-          const unavailable = action.blocked_reason === 'dispatch_disabled'
+          const unavailable = action.blocked_reason === 'operation_declared_absent'
+            ? 'Absence déclarée'
+            : action.blocked_reason === 'operation_not_scheduled'
+              ? 'Non prévu pour cette fenêtre'
+              : action.blocked_reason === 'dispatch_disabled'
             ? 'Déclenchement désactivé'
             : action.blocked_reason === 'already_running'
               ? 'Déjà en cours'
+              : action.blocked_reason === 'already_completed'
+                ? 'Analyse terminée'
               : action.blocked_reason === 'research_disabled'
                 ? 'Recherche désactivée'
-                : 'Rien à traiter';
+                : 'Entrée non disponible';
           return <article className="admin-analysis-action" key={action.operation_type}>
-            <div><h4>{label.title}</h4><p>{label.detail}</p></div>
+            <div><h4>{label.title}</h4><p>{label.detail}</p><small>Contrat : {action.schedule_state === 'required' ? 'opération prévue' : action.schedule_state === 'declared_absent' ? 'absence déclarée' : 'hors fenêtre'}</small></div>
             <dl>
               <div><dt>Fichiers à traiter</dt><dd>{action.pending_files}</dd></div>
               <div><dt>Analyses à traiter</dt><dd>{action.pending_analyses}</dd></div>

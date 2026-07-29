@@ -330,9 +330,9 @@ describe('client API d’administration', () => {
   it('lit puis lance une analyse privée depuis le contrat admin v2', async () => {
     vi.stubEnv('VITE_API_BASE_URL', API_ORIGIN);
     const overview = { fire_id: 'FR-99-00001', episode_id: 'E01', analysis_window_id: 'window-20260712', local_date: '2026-07-12', campaign_day_state: 'ready', actions: [
-      { operation_type: 'user_media', pending_files: 3, pending_analyses: 1, running_analyses: 0, last_run_at: null, can_run: true, blocked_reason: null },
-      { operation_type: 'source_research', pending_files: 0, pending_analyses: 0, running_analyses: 1, last_run_at: '2026-07-18T10:00:00Z', can_run: false, blocked_reason: 'already_running' },
-      { operation_type: 'satellite_media', pending_files: 0, pending_analyses: 0, running_analyses: 0, last_run_at: null, can_run: false, blocked_reason: 'dispatch_disabled' },
+      { operation_type: 'user_media', schedule_state: 'required', pending_files: 3, pending_analyses: 1, running_analyses: 0, last_run_at: null, can_run: true, blocked_reason: null },
+      { operation_type: 'source_research', schedule_state: 'required', pending_files: 0, pending_analyses: 0, running_analyses: 1, last_run_at: '2026-07-18T10:00:00Z', can_run: false, blocked_reason: 'already_running' },
+      { operation_type: 'satellite_media', schedule_state: 'not_scheduled', pending_files: 0, pending_analyses: 0, running_analyses: 0, last_run_at: null, can_run: false, blocked_reason: 'operation_not_scheduled' },
     ] };
     const launched = { fire_id: 'FR-99-00001', episode_id: 'E01', analysis_window_id: 'window-20260712', operation_type: 'user_media', queued_batch_ids: ['batch-user-1'], queued_files: 3 };
     const fetchMock = vi.fn<typeof fetch>()

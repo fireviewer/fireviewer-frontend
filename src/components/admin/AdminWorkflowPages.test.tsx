@@ -233,9 +233,9 @@ describe('pages de workflow administrateur', () => {
     const fetchMock = vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
       if (String(input).includes('/api/v2/admin/agent-batches/')) return response({
         fire_id: 'FR-99-00001', episode_id: 'E01', analysis_window_id: 'window-20260712', local_date: '2026-07-12', campaign_day_state: 'ready', actions: [
-          { operation_type: 'user_media', pending_files: 0, pending_analyses: 0, running_analyses: 0, last_run_at: null, can_run: false, blocked_reason: 'nothing_to_process' },
-          { operation_type: 'source_research', pending_files: 2, pending_analyses: 1, running_analyses: 0, last_run_at: '2026-07-18T10:00:00Z', can_run: true, blocked_reason: null },
-          { operation_type: 'satellite_media', pending_files: 0, pending_analyses: 0, running_analyses: 0, last_run_at: null, can_run: false, blocked_reason: 'nothing_to_process' },
+          { operation_type: 'user_media', schedule_state: 'required', pending_files: 0, pending_analyses: 0, running_analyses: 0, last_run_at: null, can_run: false, blocked_reason: 'input_not_ready' },
+          { operation_type: 'source_research', schedule_state: 'required', pending_files: 2, pending_analyses: 1, running_analyses: 0, last_run_at: '2026-07-18T10:00:00Z', can_run: true, blocked_reason: null },
+          { operation_type: 'satellite_media', schedule_state: 'declared_absent', pending_files: 0, pending_analyses: 0, running_analyses: 0, last_run_at: null, can_run: false, blocked_reason: 'operation_declared_absent' },
         ],
       });
       if (init?.method === 'PUT') return response({ id: 'presse-locale' });

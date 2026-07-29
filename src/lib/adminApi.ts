@@ -133,12 +133,13 @@ export interface AdminAgentOperationsOverview {
   readonly campaign_day_state: 'locked' | 'ready' | 'running' | 'review' | 'published' | 'failed' | null;
   readonly actions: readonly {
     readonly operation_type: AdminAgentOperationType;
+    readonly schedule_state: 'required' | 'declared_absent' | 'not_scheduled';
     readonly pending_files: number;
     readonly pending_analyses: number;
     readonly running_analyses: number;
     readonly last_run_at: string | null;
     readonly can_run: boolean;
-    readonly blocked_reason: 'dispatch_disabled' | 'research_disabled' | 'nothing_to_process' | 'already_running' | null;
+    readonly blocked_reason: 'dispatch_disabled' | 'research_disabled' | 'operation_declared_absent' | 'operation_not_scheduled' | 'input_not_ready' | 'already_completed' | 'already_running' | null;
   }[];
 }
 
@@ -1068,12 +1069,13 @@ function parseAgentOperationsOverview(value: unknown): AdminAgentOperationsOverv
       if (!isRecord(item)) throw new Error('Commande IA invalide.');
       return {
         operation_type: readEnum(item.operation_type, 'operation_type', ['user_media', 'source_research', 'satellite_media'] as const),
+        schedule_state: readEnum(item.schedule_state, 'schedule_state', ['required', 'declared_absent', 'not_scheduled'] as const),
         pending_files: readNonNegativeInteger(item.pending_files, 'pending_files'),
         pending_analyses: readNonNegativeInteger(item.pending_analyses, 'pending_analyses'),
         running_analyses: readNonNegativeInteger(item.running_analyses, 'running_analyses'),
         last_run_at: item.last_run_at === null ? null : readIsoDate(item.last_run_at, 'last_run_at'),
         can_run: readBoolean(item.can_run, 'can_run'),
-        blocked_reason: item.blocked_reason === null ? null : readEnum(item.blocked_reason, 'blocked_reason', ['dispatch_disabled', 'research_disabled', 'nothing_to_process', 'already_running'] as const),
+        blocked_reason: item.blocked_reason === null ? null : readEnum(item.blocked_reason, 'blocked_reason', ['dispatch_disabled', 'research_disabled', 'operation_declared_absent', 'operation_not_scheduled', 'input_not_ready', 'already_completed', 'already_running'] as const),
       };
     }),
   };
