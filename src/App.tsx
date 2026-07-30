@@ -1,4 +1,4 @@
-import { lazy, Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { FireWarningHomePage } from './components/public/FireWarningHomePage';
 import { FireWarningIncidentsPage } from './components/public/FireWarningIncidentsPage';
 import {
@@ -18,7 +18,6 @@ import {
 } from './components/public/FireWarningBasicPages';
 import { PublicSiteShell } from './components/public/FireWarningPublicShell';
 import { PublicIcon, type PublicIconName } from './components/public/PublicIcon';
-import { validateAdminSession } from './lib/adminSession';
 import { getDataMode, isAbortError, loadViewerManifest } from './lib/manifestClient';
 import { loadPublicIncidentView, type PublicIncidentView } from './lib/publicIncidentView';
 import { VIEWER_MANIFEST_FIRE_ID_RE, type ViewerManifestSummary } from './lib/viewerManifest';
@@ -176,11 +175,6 @@ function SimulatedIncidentPreview() {
   return <PublicSiteShell section="incident"><div className="fw-incident-runtime"><div className="fw-incident-runtime__notice"><PublicIcon name="info" size={18} /><span>Démonstration : incident simulé, sans référence à un incendie réel.</span></div><PublicIncidentRealPage summary={summary} checkedAt={checkedAt} stale refreshing={false} onRefresh={() => undefined} detailRequest={Promise.resolve({ view: demo, error: null })} emptyPreview demoLabel="Incident simulé" /></div></PublicSiteShell>;
 }
 
-/** Le verrouillage n’affecte pas l’environnement de développement local. */
-export function isPublicAccessLocked(environment: { readonly PROD?: unknown } = import.meta.env): boolean {
-  return environment.PROD === true;
-}
-
 function PublicIncidentAddressRequiredScreen() {
   return (
     <PublicStateScreen
@@ -191,33 +185,6 @@ function PublicIncidentAddressRequiredScreen() {
       action={<a className="fw-button fw-button--primary" href="/incendies">Voir les incendies <PublicIcon name="arrow" size={17} /></a>}
     />
   );
-}
-
-function PublicAccessClosedScreen({ checking = false }: { readonly checking?: boolean }) {
-  return <main className="fw-public-lock" aria-labelledby="fw-public-lock-title" role={checking ? 'status' : undefined} aria-live={checking ? 'polite' : undefined}>
-    <div className="fw-public-lock__card">
-      <span><PublicIcon name={checking ? 'lock' : 'search'} size={31} /></span>
-      <p>{checking ? 'Accès protégé' : '404'}</p>
-      <h1 id="fw-public-lock-title">{checking ? 'Vérification de l’accès…' : 'Cette page n’est pas disponible'}</h1>
-      <p>{checking ? 'La session administrateur est vérifiée avant d’ouvrir une fiche ou une page publique.' : 'La consultation publique est temporairement fermée. Une démonstration d’incident simulé reste accessible.'}</p>
-      {!checking ? <a className="fw-button fw-button--primary" href="/demo">Ouvrir la démonstration <PublicIcon name="arrow" size={17} /></a> : null}
-    </div>
-  </main>;
-}
-
-function PublicAccessGate({ children }: { readonly children: ReactNode }) {
-  const [state, setState] = useState<'checking' | 'granted' | 'denied'>('checking');
-
-  useEffect(() => {
-    const controller = new AbortController();
-    void validateAdminSession({ signal: controller.signal })
-      .then((result) => { if (!controller.signal.aborted) setState(result.ok ? 'granted' : 'denied'); })
-      .catch(() => { if (!controller.signal.aborted) setState('denied'); });
-    return () => controller.abort();
-  }, []);
-
-  if (state === 'checking') return <PublicAccessClosedScreen checking />;
-  return state === 'granted' ? <>{children}</> : <PublicAccessClosedScreen />;
 }
 
 function SimulatedDemoApp() {
@@ -369,5 +336,5 @@ export default function App({ refreshIntervalMs }: AppProps) {
                 : getDataMode() !== 'api' ? <EmptyIncidentPreview fireId={route.fireId} />
                   : <LiveManifestApp fireId={route.fireId} refreshIntervalMs={refreshIntervalMs} />;
 
-  return isPublicAccessLocked() ? <PublicAccessGate>{publicContent}</PublicAccessGate> : publicContent;
+  return publicContent;
 }
