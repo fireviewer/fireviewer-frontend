@@ -63,6 +63,7 @@ export type PublicIncidentView = {
   }[];
   readonly active_fire_zone?: {
     readonly zone_revision_id: string;
+    readonly zone_kind: 'active' | 'burned';
     readonly revision: number;
     readonly valid_at: string;
     readonly analysis_id: string | null;
@@ -70,6 +71,15 @@ export type PublicIncidentView = {
   } | null;
   readonly active_fire_zones?: readonly {
     readonly zone_revision_id: string;
+    readonly zone_kind: 'active' | 'burned';
+    readonly revision: number;
+    readonly valid_at: string;
+    readonly analysis_id: string | null;
+    readonly geometry_geojson: Readonly<Record<string, unknown>>;
+  }[];
+  readonly burned_area_zones?: readonly {
+    readonly zone_revision_id: string;
+    readonly zone_kind: 'active' | 'burned';
     readonly revision: number;
     readonly valid_at: string;
     readonly analysis_id: string | null;
@@ -256,7 +266,7 @@ function parseView(value: unknown): PublicIncidentView {
     if (!itemRecord || typeof itemRecord.projection_id !== 'string' || typeof itemRecord.episode_id !== 'string' || (itemRecord.kind !== 'validated_marker' && itemRecord.kind !== 'generalized_area') || (itemRecord.verification_state !== 'VERIFIED' && itemRecord.verification_state !== 'CORROBORATED') || typeof itemRecord.radius_m !== 'number' || !Number.isFinite(itemRecord.radius_m) || itemRecord.radius_m <= 0) throw new PublicIncidentViewError(null, 'Projection de preuve invalide.');
     return { projection_id: itemRecord.projection_id, episode_id: itemRecord.episode_id, kind: itemRecord.kind, verification_state: itemRecord.verification_state, center: point(itemRecord.center, 'evidence.center'), radius_m: itemRecord.radius_m, label: string(itemRecord.label, 'evidence.label')!, observed_at: iso(itemRecord.observed_at, 'evidence.observed_at', true) };
   });
-  const parseActiveZone = (value: unknown, label: string) => {
+  const parseActiveZone = (value: unknown, label: string, defaultZoneKind: 'active' | 'burned') => {
     const item = record(value);
     if (!item || typeof item.zone_revision_id !== 'string' || typeof item.revision !== 'number' || !Number.isInteger(item.revision) || item.revision < 1) {
       throw new PublicIncidentViewError(null, 'Périmètre public invalide.');
@@ -266,16 +276,20 @@ function parseView(value: unknown): PublicIncidentView {
     }
     return {
       zone_revision_id: item.zone_revision_id,
+      zone_kind: item.zone_kind === undefined ? defaultZoneKind : item.zone_kind === 'active' || item.zone_kind === 'burned' ? item.zone_kind : (() => { throw new PublicIncidentViewError(null, 'Type de périmètre public invalide.'); })(),
       revision: item.revision,
       valid_at: iso(item.valid_at, `${label}.valid_at`)!,
       analysis_id: typeof item.analysis_id === 'string' ? item.analysis_id : null,
       geometry_geojson: geometry(item.geometry_geojson, `${label}.geometry_geojson`),
     };
   };
-  const activeZone = root.active_fire_zone == null ? null : parseActiveZone(root.active_fire_zone, 'active_fire_zone');
+  const activeZone = root.active_fire_zone == null ? null : parseActiveZone(root.active_fire_zone, 'active_fire_zone', 'active');
   const activeZones = root.active_fire_zones === undefined
     ? (activeZone ? [activeZone] : [])
-    : list(root.active_fire_zones, 'active_fire_zones').map((item) => parseActiveZone(item, 'active_fire_zones'));
+    : list(root.active_fire_zones, 'active_fire_zones').map((item) => parseActiveZone(item, 'active_fire_zones', 'active'));
+  const burnedAreaZones = root.burned_area_zones === undefined
+    ? []
+    : list(root.burned_area_zones, 'burned_area_zones').map((item) => parseActiveZone(item, 'burned_area_zones', 'burned'));
   const parseAgentEvidence = (value: unknown) => {
     const item = record(value);
     if (!item || typeof item.evidence_kind !== 'string' || typeof item.evidence_id !== 'string') {
@@ -412,7 +426,7 @@ function parseView(value: unknown): PublicIncidentView {
   const participatoryObservationCount = participatoryCount('participatory_observation_count');
   const participatoryPublishedCount = participatoryCount('participatory_published_count');
   const participatoryReceivedCount = participatoryCount('participatory_received_count');
-  return { schema_version: '1.0', fire_id: root.fire_id, canonical_name: string(root.canonical_name, 'canonical_name', true), public_note: string(root.public_note, 'public_note', true), status: string(root.status, 'status')!, verification: root.verification === 'verified' || root.verification === 'corroborated' || root.verification === 'review_required' ? root.verification : (() => { throw new PublicIncidentViewError(null, 'Vérification invalide.'); })(), freshness_at: iso(root.freshness_at, 'freshness_at')!, last_human_validation_at: iso(root.last_human_validation_at, 'last_human_validation_at', true), participatory_observation_count: participatoryObservationCount, participatory_published_count: participatoryPublishedCount, participatory_received_count: participatoryReceivedCount, location, facts: list(root.facts, 'facts').map((entry) => string(entry, 'fact')!), limitations: list(root.limitations, 'limitations').map((entry) => string(entry, 'limitation')!), episodes, observations, evidence_projections: evidenceProjections, active_fire_zone: activeZone, active_fire_zones: activeZones, daily_intelligence: dailyIntelligence, map_gallery: mapGallery, gallery, official_resources: officialResources, operational_information: operationalInformation, sources, timeline, model: { state: model.state as PublicIncidentView['model']['state'], version: typeof model.version === 'number' ? model.version : null, sha256: string(model.sha256, 'sha256', true), size_bytes: typeof model.size_bytes === 'number' ? model.size_bytes : null, lod: string(model.lod, 'lod', true), terrain_source_year: typeof model.terrain_source_year === 'number' ? model.terrain_source_year : null, generated_at: iso(model.generated_at, 'generated_at', true), public_download_available: model.public_download_available, limitations: list(model.limitations, 'model limitation').map((entry) => string(entry, 'model limitation')!) }, downloads };
+  return { schema_version: '1.0', fire_id: root.fire_id, canonical_name: string(root.canonical_name, 'canonical_name', true), public_note: string(root.public_note, 'public_note', true), status: string(root.status, 'status')!, verification: root.verification === 'verified' || root.verification === 'corroborated' || root.verification === 'review_required' ? root.verification : (() => { throw new PublicIncidentViewError(null, 'Vérification invalide.'); })(), freshness_at: iso(root.freshness_at, 'freshness_at')!, last_human_validation_at: iso(root.last_human_validation_at, 'last_human_validation_at', true), participatory_observation_count: participatoryObservationCount, participatory_published_count: participatoryPublishedCount, participatory_received_count: participatoryReceivedCount, location, facts: list(root.facts, 'facts').map((entry) => string(entry, 'fact')!), limitations: list(root.limitations, 'limitations').map((entry) => string(entry, 'limitation')!), episodes, observations, evidence_projections: evidenceProjections, active_fire_zone: activeZone, active_fire_zones: activeZones, burned_area_zones: burnedAreaZones, daily_intelligence: dailyIntelligence, map_gallery: mapGallery, gallery, official_resources: officialResources, operational_information: operationalInformation, sources, timeline, model: { state: model.state as PublicIncidentView['model']['state'], version: typeof model.version === 'number' ? model.version : null, sha256: string(model.sha256, 'sha256', true), size_bytes: typeof model.size_bytes === 'number' ? model.size_bytes : null, lod: string(model.lod, 'lod', true), terrain_source_year: typeof model.terrain_source_year === 'number' ? model.terrain_source_year : null, generated_at: iso(model.generated_at, 'generated_at', true), public_download_available: model.public_download_available, limitations: list(model.limitations, 'model limitation').map((entry) => string(entry, 'model limitation')!) }, downloads };
 }
 
 function baseUrl(fireId: string): string {

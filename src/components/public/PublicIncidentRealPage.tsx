@@ -21,6 +21,12 @@ const RESOURCE_KIND: Record<NonNullable<PublicIncidentView['official_resources']
 const FACT_CATEGORY: Record<string, string> = { fire_activity: 'Activité du feu', burned_area: 'Surface touchée', resources: 'Moyens engagés', evacuation: 'Évacuations', access: 'Accès', infrastructure: 'Infrastructures', weather: 'Météo', other: 'Autre information' };
 const SPATIAL_KIND: Record<NonNullable<PublicIncidentView['daily_intelligence']>[number]['spatial_results'][number]['kind'], string> = { active_fire_point: 'Point actif', smoke_origin_point: 'Origine probable de fumée', visible_fire_front: 'Front visible', probable_activity_envelope: 'Zone probable d’activité', burned_area_polygon: 'Zone parcourue' };
 
+type MapDay = {
+  readonly analysis_id: string;
+  readonly local_date: string;
+  readonly intelligence: NonNullable<PublicIncidentView['daily_intelligence']>[number] | null;
+};
+
 function date(value: string | null | undefined): string {
   if (!value || !Number.isFinite(Date.parse(value))) return 'Non publiée';
   return new Intl.DateTimeFormat('fr-FR', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Europe/Paris' }).format(new Date(value));
@@ -153,14 +159,28 @@ function MapPanel({ view, summary, onClose }: { readonly view: PublicIncidentVie
   const [selectedAnalysisId, setSelectedAnalysisId] = useState<string | null>(null);
   const hasSpatial = summary.modelState === 'available' && Boolean(summary.asset || summary.scene);
   const tiledSource = useMemo(() => !scene ? null : { catalogUrl: new URL(scene.catalog_url, getViewerManifestApiOrigin() ?? window.location.origin).toString(), files: Object.fromEntries(scene.files.map((file) => [file.path, new URL(file.url, getViewerManifestApiOrigin() ?? window.location.origin).toString()])) }, [scene]);
-  const analysisDays = useMemo(() => [...(view?.daily_intelligence ?? [])].sort((left, right) => left.local_date.localeCompare(right.local_date)), [view]);
+  const analysisDays = useMemo<readonly MapDay[]>(() => {
+    const days = new Map<string, MapDay>();
+    for (const intelligence of view?.daily_intelligence ?? []) {
+      days.set(intelligence.analysis_id, { analysis_id: intelligence.analysis_id, local_date: intelligence.local_date, intelligence });
+    }
+    for (const zone of [...(view?.active_fire_zones ?? []), ...(view?.burned_area_zones ?? [])]) {
+      if (zone.analysis_id && !days.has(zone.analysis_id)) {
+        days.set(zone.analysis_id, { analysis_id: zone.analysis_id, local_date: zone.valid_at.slice(0, 10), intelligence: null });
+      }
+    }
+    return [...days.values()].sort((left, right) => left.local_date.localeCompare(right.local_date) || left.analysis_id.localeCompare(right.analysis_id));
+  }, [view]);
   const selectedDay = analysisDays.find((item) => item.analysis_id === selectedAnalysisId) ?? analysisDays.at(-1) ?? null;
   const mapLayers = useMemo(() => {
-    const activeZones = view?.active_fire_zones ?? (view?.active_fire_zone ? [view.active_fire_zone] : []);
+    const activeZones = (view?.active_fire_zones ?? (view?.active_fire_zone ? [view.active_fire_zone] : [])).filter((item) => item.zone_kind === 'active');
+    const burnedZones = (view?.burned_area_zones ?? []).filter((item) => item.zone_kind === 'burned');
     const activeForDay = selectedDay ? activeZones.filter((item) => item.analysis_id === selectedDay.analysis_id) : activeZones.slice(-1);
-    const burnedForDay = selectedDay?.spatial_results.filter((item) => item.kind === 'burned_area_polygon') ?? [];
+    const burnedForDay = selectedDay ? burnedZones.filter((item) => item.analysis_id === selectedDay.analysis_id) : burnedZones.slice(-1);
+    const legacyBurnedForDay = burnedForDay.length ? [] : selectedDay?.intelligence?.spatial_results.filter((item) => item.kind === 'burned_area_polygon') ?? [];
     return [
       ...burnedForDay.flatMap((item) => polygonBoundaries(item.geometry_geojson, '#dc5b35')),
+      ...legacyBurnedForDay.flatMap((item) => polygonBoundaries(item.geometry_geojson, '#dc5b35')),
       ...activeForDay.flatMap((item) => polygonBoundaries(item.geometry_geojson, '#ffca3a')),
     ];
   }, [selectedDay, view]);

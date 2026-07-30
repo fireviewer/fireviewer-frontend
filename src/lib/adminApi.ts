@@ -188,7 +188,7 @@ export interface AdminIncidentSpatialMarker {
   readonly gltf_position: AdminGltfPoint | null; readonly version: number;
 }
 export interface AdminActiveFireZoneRevision {
-  readonly zone_revision_id: string; readonly revision: number; readonly valid_at: string;
+  readonly zone_revision_id: string; readonly zone_kind: 'active' | 'burned'; readonly revision: number; readonly valid_at: string;
   readonly analysis_id: string | null;
   readonly geometry_geojson: Readonly<Record<string, unknown>>;
   readonly gltf_polygons: readonly (readonly (readonly AdminGltfPoint[])[])[];
@@ -1248,7 +1248,7 @@ function parseGltfPoint(value: unknown, field: string): AdminGltfPoint {
 function parseActiveFireZoneRevision(value: unknown): AdminActiveFireZoneRevision {
   if (!isRecord(value) || !isRecord(value.geometry_geojson) || !Array.isArray(value.gltf_polygons) || !Array.isArray(value.supporting_marker_ids) || !Array.isArray(value.source_revision_ids)) throw new Error('Révision de zone active invalide.');
   return {
-    zone_revision_id: readString(value.zone_revision_id, 'zone_revision_id', { max: 128 })!, revision: readPositiveInteger(value.revision, 'revision'), valid_at: readIsoDate(value.valid_at, 'valid_at'), analysis_id: value.analysis_id === undefined ? null : readString(value.analysis_id, 'analysis_id', { nullable: true, max: 128 }), geometry_geojson: value.geometry_geojson,
+    zone_revision_id: readString(value.zone_revision_id, 'zone_revision_id', { max: 128 })!, zone_kind: value.zone_kind === undefined ? 'active' : readEnum(value.zone_kind, 'zone_kind', ['active', 'burned'] as const), revision: readPositiveInteger(value.revision, 'revision'), valid_at: readIsoDate(value.valid_at, 'valid_at'), analysis_id: value.analysis_id === undefined ? null : readString(value.analysis_id, 'analysis_id', { nullable: true, max: 128 }), geometry_geojson: value.geometry_geojson,
     gltf_polygons: value.gltf_polygons.map((polygon, polygonIndex) => { if (!Array.isArray(polygon)) throw new Error('Polygone glTF invalide.'); return polygon.map((ring, ringIndex) => { if (!Array.isArray(ring)) throw new Error('Anneau glTF invalide.'); return ring.map((point, pointIndex) => parseGltfPoint(point, `gltf_polygons.${polygonIndex}.${ringIndex}.${pointIndex}`)); }); }),
     geometry_origin: readString(value.geometry_origin, 'geometry_origin', { max: 64 })!, supporting_marker_ids: value.supporting_marker_ids.map((item) => readString(item, 'supporting_marker_id', { max: 128 })!), source_revision_ids: value.source_revision_ids.map((item) => readString(item, 'source_revision_id', { max: 128 })!), review_state: readEnum(value.review_state, 'review_state', ['DRAFT', 'READY_FOR_PUBLICATION', 'REJECTED'] as const),
     supersedes_zone_revision_id: readString(value.supersedes_zone_revision_id, 'supersedes_zone_revision_id', { nullable: true, max: 128 }), reason: readString(value.reason, 'reason', { max: 500 })!, created_by: readString(value.created_by, 'created_by', { max: 255 })!, reviewed_by: readString(value.reviewed_by, 'reviewed_by', { nullable: true, max: 255 }), reviewed_at: value.reviewed_at === null ? null : readIsoDate(value.reviewed_at, 'reviewed_at'), review_reason: readString(value.review_reason, 'review_reason', { nullable: true, max: 500 }), created_at: readIsoDate(value.created_at, 'created_at'),
@@ -2469,7 +2469,7 @@ export class AdminApiClient {
     if (!isRecord(payload) || payload.marker_id !== markerId) throw new AdminApiError('parse', 'La réponse de revue du marqueur est invalide.');
   }
 
-  async createActiveFireZoneRevision(fireId: string, input: { expected_latest_revision: number; valid_at: string; analysis_id?: string; geometry_geojson: Readonly<Record<string, unknown>>; supporting_marker_ids: readonly string[]; geometry_origin?: 'HUMAN_AUTHORED' | 'SATELLITE_PRODUCT'; reason: string }, options: AdminRequestOptions): Promise<AdminActiveFireZoneRevision> {
+  async createActiveFireZoneRevision(fireId: string, input: { expected_latest_revision: number; zone_kind: 'active' | 'burned'; valid_at: string; analysis_id?: string; geometry_geojson: Readonly<Record<string, unknown>>; supporting_marker_ids: readonly string[]; geometry_origin?: 'HUMAN_AUTHORED' | 'SATELLITE_PRODUCT'; reason: string }, options: AdminRequestOptions): Promise<AdminActiveFireZoneRevision> {
     const payload = await this.postJson(`/incidents/${encodeURIComponent(fireId)}/active-zone-revisions`, input, options);
     try { return parseActiveFireZoneRevision(payload); }
     catch { throw new AdminApiError('parse', 'La révision de zone active retournée est invalide.'); }
