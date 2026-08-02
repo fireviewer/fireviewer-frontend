@@ -59,13 +59,15 @@ export interface TiledSceneSource {
 }
 
 export interface TiledScenePoint { readonly position: readonly [number, number, number]; readonly color: string; }
-export interface TiledSceneLine { readonly points: readonly (readonly [number, number, number])[]; readonly color: string; }
-export interface TiledSceneWgs84Line { readonly points: readonly (readonly [number, number])[]; readonly color: string; }
+export interface TiledSceneLine { readonly points: readonly (readonly [number, number, number])[]; readonly color: string; readonly renderOrder?: number; }
+export interface TiledSceneWgs84Line { readonly points: readonly (readonly [number, number])[]; readonly color: string; readonly renderOrder?: number; }
 export interface TiledSceneWgs84Polygon {
   readonly outer: readonly (readonly [number, number])[];
   readonly holes?: readonly (readonly (readonly [number, number])[])[];
   readonly color: string;
   readonly opacity: number;
+  readonly elevation?: number;
+  readonly renderOrder?: number;
 }
 export type TiledSceneViewPreset = 'near' | 'local' | 'extended';
 
@@ -74,6 +76,8 @@ interface TiledScenePolygon {
   readonly holes: readonly (readonly (readonly [number, number])[])[];
   readonly color: string;
   readonly opacity: number;
+  readonly elevation?: number;
+  readonly renderOrder?: number;
 }
 
 interface Runtime {
@@ -332,7 +336,7 @@ function projectWgs84OverlayLines(origin: UnityOrigin, lines: readonly TiledScen
       const [east, north] = projectLambert93Overlay(origin, projected);
       return [[east, 0, north] as const];
     });
-    return points.length >= 2 ? [{ points, color: line.color }] : [];
+    return points.length >= 2 ? [{ points, color: line.color, renderOrder: line.renderOrder }] : [];
   });
 }
 
@@ -345,7 +349,7 @@ function projectWgs84OverlayPolygons(origin: UnityOrigin, polygons: readonly Til
   return polygons.flatMap((polygon) => {
     const outer = projectRing(polygon.outer);
     if (outer.length < 3) return [];
-    return [{ outer, holes: (polygon.holes ?? []).map(projectRing).filter((hole) => hole.length >= 3), color: polygon.color, opacity: polygon.opacity }];
+    return [{ outer, holes: (polygon.holes ?? []).map(projectRing).filter((hole) => hole.length >= 3), color: polygon.color, opacity: polygon.opacity, elevation: polygon.elevation, renderOrder: polygon.renderOrder }];
   });
 }
 
@@ -371,8 +375,8 @@ function redrawOverlays(runtime: Runtime, points: readonly TiledScenePoint[], li
       new ShapeGeometry(shape),
       new MeshBasicMaterial({ color: item.color, side: DoubleSide, transparent: true, opacity: item.opacity, depthTest: false, depthWrite: false }),
     );
-    surface.position.z = 4;
-    surface.renderOrder = 18;
+    surface.position.z = item.elevation ?? 4;
+    surface.renderOrder = item.renderOrder ?? 18;
     runtime.overlays.add(surface);
   }
   for (const item of points) {
@@ -385,7 +389,7 @@ function redrawOverlays(runtime: Runtime, points: readonly TiledScenePoint[], li
       new BufferGeometry().setFromPoints(item.points.map((point) => overlayWorld(runtime.origin, point, 5))),
       new LineBasicMaterial({ color: item.color, depthTest: false, transparent: true, opacity: 0.96 }),
     );
-    line.renderOrder = 19; runtime.overlays.add(line);
+    line.renderOrder = item.renderOrder ?? 19; runtime.overlays.add(line);
   }
   runtime.instance.notifyChange(runtime.overlays);
 }

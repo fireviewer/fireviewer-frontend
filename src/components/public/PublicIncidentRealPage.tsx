@@ -144,7 +144,7 @@ function IncidentActions({ fireId }: { readonly fireId: string }) {
   return <section className="fw-incident-actions" aria-label="Actions utiles"><div><PublicIcon name="phone" size={23} /><div><h2>Besoin d’une aide immédiate ?</h2><p>En cas de danger ou de personnes menacées, contactez les secours.</p></div></div><div className="fw-incident-actions__buttons"><a className="fw-button fw-button--outline" href="tel:18">Appeler le 18</a><a className="fw-button fw-button--outline" href="tel:112">Appeler le 112</a><a className="fw-button fw-button--primary" href={`/incendie/${fireId}/ajouter-preuve`}><PublicIcon name="plus-circle" size={17} />Ajouter une preuve</a></div></section>;
 }
 
-function polygonOverlays(geometry: Readonly<Record<string, unknown>>, color: string, opacity: number): readonly TiledSceneWgs84Polygon[] {
+function polygonOverlays(geometry: Readonly<Record<string, unknown>>, color: string, opacity: number, elevation: number, renderOrder: number): readonly TiledSceneWgs84Polygon[] {
   const point = (value: unknown): readonly [number, number] | null => Array.isArray(value) && typeof value[0] === 'number' && Number.isFinite(value[0]) && typeof value[1] === 'number' && Number.isFinite(value[1]) ? [value[0], value[1]] : null;
   const ring = (value: unknown): readonly (readonly [number, number])[] | null => {
     if (!Array.isArray(value)) return null;
@@ -155,7 +155,7 @@ function polygonOverlays(geometry: Readonly<Record<string, unknown>>, color: str
     if (!Array.isArray(value)) return null;
     const rings = value.map(ring).filter((item): item is readonly (readonly [number, number])[] => item !== null);
     const [outer, ...holes] = rings;
-    return outer ? { outer, holes, color, opacity } : null;
+    return outer ? { outer, holes, color, opacity, elevation, renderOrder } : null;
   };
   const coordinates = geometry.coordinates;
   if (geometry.type === 'Polygon') { const value = polygon(coordinates); return value ? [value] : []; }
@@ -164,7 +164,7 @@ function polygonOverlays(geometry: Readonly<Record<string, unknown>>, color: str
 }
 
 function polygonBoundaries(polygons: readonly TiledSceneWgs84Polygon[]): readonly TiledSceneWgs84Line[] {
-  return polygons.flatMap((polygon) => [{ points: polygon.outer, color: polygon.color }, ...(polygon.holes ?? []).map((points) => ({ points, color: polygon.color }))]);
+  return polygons.flatMap((polygon) => [{ points: polygon.outer, color: polygon.color, renderOrder: (polygon.renderOrder ?? 18) + 1 }, ...(polygon.holes ?? []).map((points) => ({ points, color: polygon.color, renderOrder: (polygon.renderOrder ?? 18) + 1 }))]);
 }
 
 function MapPanel({ view, summary, onClose }: { readonly view: PublicIncidentView | null; readonly summary: ViewerManifestSummary; readonly onClose: () => void }) {
@@ -197,9 +197,9 @@ function MapPanel({ view, summary, onClose }: { readonly view: PublicIncidentVie
     const burnedForDay = selectedDay ? burnedZones.filter((item) => item.analysis_id === selectedDay.analysis_id) : burnedZones.slice(-1);
     const legacyBurnedForDay = burnedForDay.length ? [] : selectedDay?.intelligence?.spatial_results.filter((item) => item.kind === 'burned_area_polygon') ?? [];
     const polygons = [
-      ...burnedForDay.flatMap((item) => polygonOverlays(item.geometry_geojson, '#dc5b35', 0.36)),
-      ...legacyBurnedForDay.flatMap((item) => polygonOverlays(item.geometry_geojson, '#dc5b35', 0.36)),
-      ...activeForDay.flatMap((item) => polygonOverlays(item.geometry_geojson, '#ffca3a', 0.54)),
+      ...burnedForDay.flatMap((item) => polygonOverlays(item.geometry_geojson, '#dc5b35', 0.36, 4, 18)),
+      ...legacyBurnedForDay.flatMap((item) => polygonOverlays(item.geometry_geojson, '#dc5b35', 0.36, 4, 18)),
+      ...activeForDay.flatMap((item) => polygonOverlays(item.geometry_geojson, '#ffd43b', 0.86, 8, 28)),
     ];
     return { polygons, outlines: polygonBoundaries(polygons) };
   }, [selectedDay, view]);

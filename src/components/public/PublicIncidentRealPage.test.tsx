@@ -7,7 +7,7 @@ import { PublicIncidentRealPage } from './PublicIncidentRealPage';
 import type { PublicIncidentView } from '../../lib/publicIncidentView';
 import type { ViewerManifestSummary } from '../../lib/viewerManifest';
 
-vi.mock('./TiledSpatialScene3D', () => ({ TiledSpatialScene3D: ({ viewPreset }: { readonly viewPreset: string }) => <div data-testid="tiled-scene-preset">Preset {viewPreset}</div> }));
+vi.mock('./TiledSpatialScene3D', () => ({ TiledSpatialScene3D: ({ viewPreset, overlayWgs84Polygons = [] }: { readonly viewPreset: string; readonly overlayWgs84Polygons?: readonly { readonly color: string; readonly elevation?: number; readonly renderOrder?: number }[] }) => <div data-testid="tiled-scene-preset" data-polygon-layers={overlayWgs84Polygons.map((item) => `${item.color}:${item.elevation ?? 4}:${item.renderOrder ?? 18}`).join(',')}>Preset {viewPreset}</div> }));
 vi.mock('../../lib/publicSpatialScene', () => ({ loadPublicSpatialScene: vi.fn() }));
 vi.mock('../../lib/manifestClient', () => ({ getViewerManifestApiOrigin: () => 'https://api.firewarning.test' }));
 
@@ -81,6 +81,8 @@ it('présente toutes les journées spatiales et bascule les deux calques avec la
   expect(tabs[0]).toHaveAttribute('aria-selected', 'true');
   expect(screen.getByText('Zone parcourue')).toBeVisible();
   expect(screen.getByText('Zone active')).toBeVisible();
+  expect(screen.getByTestId('tiled-scene-preset')).toHaveAttribute('data-polygon-layers', expect.stringContaining('#dc5b35:4:18'));
+  expect(screen.getByTestId('tiled-scene-preset')).toHaveAttribute('data-polygon-layers', expect.stringContaining('#ffd43b:8:28'));
 });
 
 it('résout les fichiers de scène différés seulement après l’action explicite', async () => {
