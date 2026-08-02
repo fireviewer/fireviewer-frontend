@@ -436,7 +436,7 @@ export function TiledSpatialScene3D({
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const runtimeRef = useRef<Runtime | null>(null);
-  const [detailLodEnabled, setDetailLodEnabled] = useState(true);
+  const [detailLodEnabled, setDetailLodEnabled] = useState(false);
   const propsRef = useRef({ overlayPoints, overlayLines, overlayWgs84Lines, overlayWgs84Polygons, overlayFocusWgs84, onPick, drawMode, cameraMode, detailLodEnabled, viewPreset });
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [detailState, setDetailState] = useState({ active: 0, expected: 0, failures: 0 });
