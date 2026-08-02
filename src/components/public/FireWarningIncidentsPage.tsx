@@ -35,9 +35,14 @@ export function FireWarningIncidentsPage() {
 
   useEffect(() => {
     if (!publicDiscoveryOrigin()) { setState({ kind: 'error', message: 'La connexion à l’API publique n’est pas configurée.', cached: [] }); return; }
-    const latitude = Number(params.get('latitude'));
-    const longitude = Number(params.get('longitude'));
-    void load(firstQuery, Number.isFinite(latitude) && Number.isFinite(longitude) ? { latitude, longitude } : undefined);
+    const latitudeParameter = params.get('latitude');
+    const longitudeParameter = params.get('longitude');
+    const latitude = latitudeParameter === null ? Number.NaN : Number(latitudeParameter);
+    const longitude = longitudeParameter === null ? Number.NaN : Number(longitudeParameter);
+    void load(
+      firstQuery,
+      Number.isFinite(latitude) && Number.isFinite(longitude) ? { latitude, longitude } : undefined,
+    );
   // Les paramètres initiaux ne changent pas sans navigation complète.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
