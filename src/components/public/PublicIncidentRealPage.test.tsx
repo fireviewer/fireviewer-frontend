@@ -83,6 +83,9 @@ it('présente toutes les journées spatiales et bascule les deux calques avec la
   expect(screen.getByText('Zone active')).toBeVisible();
   expect(screen.getByTestId('tiled-scene-preset')).toHaveAttribute('data-polygon-layers', expect.stringContaining('#dc5b35:4:18'));
   expect(screen.getByTestId('tiled-scene-preset')).toHaveAttribute('data-polygon-layers', expect.stringContaining('#ffd43b:8:28'));
+  await user.click(screen.getByRole('button', { name: /Zone parcourue/ }));
+  expect(screen.getByRole('button', { name: /Zone parcourue/ })).toHaveAttribute('aria-pressed', 'false');
+  expect(screen.getByTestId('tiled-scene-preset')).toHaveAttribute('data-polygon-layers', '#ffd43b:8:28');
 });
 
 it('résout les fichiers de scène différés seulement après l’action explicite', async () => {

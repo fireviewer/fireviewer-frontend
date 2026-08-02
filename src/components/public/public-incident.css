@@ -191,7 +191,10 @@
 .fw-map-day-timeline .fw-incident-date-picker { margin: 0; padding-bottom: 2px; }
 .fw-map-day-timeline .fw-incident-date-picker button { border-color: #51636f; color: #d7e0e5; background: #102a3a; }
 .fw-map-day-timeline .fw-incident-date-picker button.is-active { border-color: var(--fw-orange); color: #fff; background: var(--fw-orange); }
-.fw-map-layer-legend { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; color: #d7e0e5; font-size: .65rem; white-space: nowrap; }
+.fw-map-layer-legend { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; color: #d7e0e5; font-size: .65rem; white-space: nowrap; }
+.fw-map-layer-legend button { appearance: none; border: 1px solid #51636f; border-radius: 999px; padding: 3px 6px; color: inherit; background: #102a3a; font: inherit; cursor: pointer; }
+.fw-map-layer-legend button:hover, .fw-map-layer-legend button:focus-visible { border-color: #b6cbd6; outline: none; }
+.fw-map-layer-legend button.is-muted { opacity: .46; }
 .fw-map-layer-legend i { font-style: normal; }
 .fw-map-layer-legend .is-burned { color: #dc5b35; }
 .fw-map-layer-legend .is-active { color: #ffca3a; }
