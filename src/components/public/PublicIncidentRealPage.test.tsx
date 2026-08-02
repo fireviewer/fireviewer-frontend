@@ -7,7 +7,7 @@ import { PublicIncidentRealPage } from './PublicIncidentRealPage';
 import type { PublicIncidentView } from '../../lib/publicIncidentView';
 import type { ViewerManifestSummary } from '../../lib/viewerManifest';
 
-vi.mock('./TiledSpatialScene3D', () => ({ TiledSpatialScene3D: ({ viewPreset, overlayWgs84Polygons = [] }: { readonly viewPreset: string; readonly overlayWgs84Polygons?: readonly { readonly color: string; readonly elevation?: number; readonly renderOrder?: number }[] }) => <div data-testid="tiled-scene-preset" data-polygon-layers={overlayWgs84Polygons.map((item) => `${item.color}:${item.elevation ?? 4}:${item.renderOrder ?? 18}`).join(',')}>Preset {viewPreset}</div> }));
+vi.mock('./TiledSpatialScene3D', () => ({ TiledSpatialScene3D: ({ viewPreset, overlayWgs84Polygons = [], overlayFocusWgs84 }: { readonly viewPreset: string; readonly overlayWgs84Polygons?: readonly { readonly color: string; readonly elevation?: number; readonly renderOrder?: number }[]; readonly overlayFocusWgs84?: readonly [number, number] }) => <div data-testid="tiled-scene-preset" data-polygon-layers={overlayWgs84Polygons.map((item) => `${item.color}:${item.elevation ?? 4}:${item.renderOrder ?? 18}`).join(',')} data-overlay-focus={overlayFocusWgs84?.join(',') ?? ''}>Preset {viewPreset}</div> }));
 vi.mock('../../lib/publicSpatialScene', () => ({ loadPublicSpatialScene: vi.fn() }));
 vi.mock('../../lib/manifestClient', () => ({ getViewerManifestApiOrigin: () => 'https://api.firewarning.test' }));
 
@@ -83,6 +83,7 @@ it('présente toutes les journées spatiales et bascule les deux calques avec la
   expect(screen.getByText('Zone active')).toBeVisible();
   expect(screen.getByTestId('tiled-scene-preset')).toHaveAttribute('data-polygon-layers', expect.stringContaining('#dc5b35:4:18'));
   expect(screen.getByTestId('tiled-scene-preset')).toHaveAttribute('data-polygon-layers', expect.stringContaining('#ffd43b:8:28'));
+  expect(screen.getByTestId('tiled-scene-preset')).toHaveAttribute('data-overlay-focus', '6.105,43.2025');
   await user.click(screen.getByRole('button', { name: /Zone parcourue/ }));
   expect(screen.getByRole('button', { name: /Zone parcourue/ })).toHaveAttribute('aria-pressed', 'false');
   expect(screen.getByTestId('tiled-scene-preset')).toHaveAttribute('data-polygon-layers', '#ffd43b:8:28');

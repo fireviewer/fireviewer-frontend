@@ -167,6 +167,14 @@ function polygonBoundaries(polygons: readonly TiledSceneWgs84Polygon[]): readonl
   return polygons.flatMap((polygon) => [{ points: polygon.outer, color: polygon.color, renderOrder: (polygon.renderOrder ?? 18) + 1 }, ...(polygon.holes ?? []).map((points) => ({ points, color: polygon.color, renderOrder: (polygon.renderOrder ?? 18) + 1 }))]);
 }
 
+function polygonFocus(polygons: readonly TiledSceneWgs84Polygon[]): readonly [number, number] | undefined {
+  const points = polygons.flatMap((polygon) => polygon.outer).filter((point) => Number.isFinite(point[0]) && Number.isFinite(point[1]));
+  if (!points.length) return undefined;
+  const longitude = points.reduce((sum, point) => sum + point[0], 0) / points.length;
+  const latitude = points.reduce((sum, point) => sum + point[1], 0) / points.length;
+  return [longitude, latitude];
+}
+
 function MapPanel({ view, summary, onClose }: { readonly view: PublicIncidentView | null; readonly summary: ViewerManifestSummary; readonly onClose: () => void }) {
   const [lowData, setLowData] = useState(() => localStorage.getItem('firewarning-low-data') === 'true');
   const [open3d, setOpen3d] = useState(false);
@@ -198,12 +206,17 @@ function MapPanel({ view, summary, onClose }: { readonly view: PublicIncidentVie
     const activeForDay = selectedDay ? activeZones.filter((item) => item.analysis_id === selectedDay.analysis_id) : activeZones.slice(-1);
     const burnedForDay = selectedDay ? burnedZones.filter((item) => item.analysis_id === selectedDay.analysis_id) : burnedZones.slice(-1);
     const legacyBurnedForDay = burnedForDay.length ? [] : selectedDay?.intelligence?.spatial_results.filter((item) => item.kind === 'burned_area_polygon') ?? [];
-    const polygons = [
-      ...(showBurnedArea ? burnedForDay.flatMap((item) => polygonOverlays(item.geometry_geojson, '#dc5b35', 0.36, 4, 18)) : []),
-      ...(showBurnedArea ? legacyBurnedForDay.flatMap((item) => polygonOverlays(item.geometry_geojson, '#dc5b35', 0.36, 4, 18)) : []),
-      ...(showActiveArea ? activeForDay.flatMap((item) => polygonOverlays(item.geometry_geojson, '#ffd43b', 0.86, 8, 28)) : []),
+    const burnedPolygons = [
+      ...burnedForDay.flatMap((item) => polygonOverlays(item.geometry_geojson, '#dc5b35', 0.36, 4, 18)),
+      ...legacyBurnedForDay.flatMap((item) => polygonOverlays(item.geometry_geojson, '#dc5b35', 0.36, 4, 18)),
     ];
-    return { polygons, outlines: polygonBoundaries(polygons), burnedCount: burnedForDay.length + legacyBurnedForDay.length, activeCount: activeForDay.length };
+    const activePolygons = activeForDay.flatMap((item) => polygonOverlays(item.geometry_geojson, '#ffd43b', 0.86, 8, 28));
+    const polygons = [
+      ...(showBurnedArea ? burnedPolygons : []),
+      ...(showActiveArea ? activePolygons : []),
+    ];
+    const focus = polygonFocus(showActiveArea && activePolygons.length ? activePolygons : burnedPolygons);
+    return { polygons, outlines: polygonBoundaries(polygons), focus, burnedCount: burnedForDay.length + legacyBurnedForDay.length, activeCount: activeForDay.length };
   }, [selectedDay, showActiveArea, showBurnedArea, view]);
   const setLow = () => setLowData((value) => { localStorage.setItem('firewarning-low-data', String(!value)); return !value; });
   const openSpatialView = async () => {
@@ -233,7 +246,7 @@ function MapPanel({ view, summary, onClose }: { readonly view: PublicIncidentVie
         {hasSpatial && !lowData && open3d ? <div className="fw-incident-viewer">
           <div className="fw-viewer-distance" aria-label="Distance de la représentation">{([['near', 'Zone proche'], ['local', 'Secteur local'], ['extended', 'Vue étendue']] as const).map(([id, label]) => <button key={id} className={preset === id ? 'is-active' : undefined} type="button" onClick={() => setPreset(id)}>{label}</button>)}</div>
           {analysisDays.length ? <section className="fw-map-day-timeline" aria-label="Chronologie des périmètres"><header><div><strong>Journée représentée</strong><small>{analysisDays.length} journées disponibles · les deux calques changent ensemble</small></div><div className="fw-map-layer-legend" aria-label="Calques de périmètre"><button type="button" className={showBurnedArea ? undefined : 'is-muted'} aria-pressed={showBurnedArea} onClick={() => setShowBurnedArea((value) => !value)}><i className="is-burned">●</i> Zone parcourue</button><button type="button" className={showActiveArea ? undefined : 'is-muted'} aria-pressed={showActiveArea} onClick={() => setShowActiveArea((value) => !value)}><i className="is-active">●</i> Zone active</button></div></header><div className="fw-incident-date-picker" role="tablist" aria-label="Choisir une journée de périmètre">{analysisDays.map((item) => <button key={item.analysis_id} role="tab" type="button" className={item.analysis_id === selectedDay?.analysis_id ? 'is-active' : undefined} aria-selected={item.analysis_id === selectedDay?.analysis_id} onClick={() => setSelectedAnalysisId(item.analysis_id)}>{new Intl.DateTimeFormat('fr-FR', { day: '2-digit', month: 'short', timeZone: 'Europe/Paris' }).format(new Date(`${item.local_date}T12:00:00Z`))}</button>)}</div><p>{selectedDay ? `${day(selectedDay.local_date)} · ${mapLayers.burnedCount} zone${mapLayers.burnedCount > 1 ? 's' : ''} parcourue${mapLayers.burnedCount > 1 ? 's' : ''} · ${mapLayers.activeCount} zone${mapLayers.activeCount > 1 ? 's' : ''} active${mapLayers.activeCount > 1 ? 's' : ''}` : 'Aucune journée disponible'}</p></section> : null}
-          {tiledSource ? <Suspense fallback={<div className="incident-tiled-scene__loading" role="status">Préparation de la vue 3D…</div>}><TiledSpatialScene3D source={tiledSource} overlayOriginWgs84={summary.frame?.origin_wgs84} viewPreset={preset} overlayWgs84Lines={mapLayers.outlines} overlayWgs84Polygons={mapLayers.polygons} /></Suspense> : summary.asset ? <IncidentGlbViewer assetUrl={summary.asset.url} version={summary.asset.version} sha256={summary.asset.sha256} frame={summary.frame} terrainSourceYear={summary.freshness.terrain_source_year} observations={view?.observations ?? []} /> : null}
+          {tiledSource ? <Suspense fallback={<div className="incident-tiled-scene__loading" role="status">Préparation de la vue 3D…</div>}><TiledSpatialScene3D source={tiledSource} overlayOriginWgs84={summary.frame?.origin_wgs84} overlayFocusWgs84={mapLayers.focus} viewPreset={preset} overlayWgs84Lines={mapLayers.outlines} overlayWgs84Polygons={mapLayers.polygons} /></Suspense> : summary.asset ? <IncidentGlbViewer assetUrl={summary.asset.url} version={summary.asset.version} sha256={summary.asset.sha256} frame={summary.frame} terrainSourceYear={summary.freshness.terrain_source_year} observations={view?.observations ?? []} /> : null}
         </div> : null}
       </div>
     </aside>

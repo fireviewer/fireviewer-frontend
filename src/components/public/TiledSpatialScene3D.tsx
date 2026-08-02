@@ -419,6 +419,7 @@ export function TiledSpatialScene3D({
   overlayLines = [],
   overlayWgs84Lines = [],
   overlayWgs84Polygons = [],
+  overlayFocusWgs84,
 }: {
   readonly source: TiledSceneSource;
   readonly overlayOriginWgs84?: readonly [number, number, number];
@@ -430,17 +431,26 @@ export function TiledSpatialScene3D({
   readonly overlayLines?: readonly TiledSceneLine[];
   readonly overlayWgs84Lines?: readonly TiledSceneWgs84Line[];
   readonly overlayWgs84Polygons?: readonly TiledSceneWgs84Polygon[];
+  /** Focus point for the currently represented daily perimeter, in WGS84 longitude/latitude. */
+  readonly overlayFocusWgs84?: readonly [number, number];
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const runtimeRef = useRef<Runtime | null>(null);
   const [detailLodEnabled, setDetailLodEnabled] = useState(true);
-  const propsRef = useRef({ overlayPoints, overlayLines, overlayWgs84Lines, overlayWgs84Polygons, onPick, drawMode, cameraMode, detailLodEnabled, viewPreset });
+  const propsRef = useRef({ overlayPoints, overlayLines, overlayWgs84Lines, overlayWgs84Polygons, overlayFocusWgs84, onPick, drawMode, cameraMode, detailLodEnabled, viewPreset });
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [detailState, setDetailState] = useState({ active: 0, expected: 0, failures: 0 });
-  propsRef.current = { overlayPoints, overlayLines, overlayWgs84Lines, overlayWgs84Polygons, onPick, drawMode, cameraMode, detailLodEnabled, viewPreset };
+  propsRef.current = { overlayPoints, overlayLines, overlayWgs84Lines, overlayWgs84Polygons, overlayFocusWgs84, onPick, drawMode, cameraMode, detailLodEnabled, viewPreset };
 
   useEffect(() => { const runtime = runtimeRef.current; if (runtime) redrawOverlays(runtime, overlayPoints, [...overlayLines, ...projectWgs84OverlayLines(runtime.origin, overlayWgs84Lines)], projectWgs84OverlayPolygons(runtime.origin, overlayWgs84Polygons)); }, [overlayPoints, overlayLines, overlayWgs84Lines, overlayWgs84Polygons]);
-  useEffect(() => { const runtime = runtimeRef.current; if (runtime) frameCamera(runtime, viewPreset); }, [viewPreset]);
+  useEffect(() => {
+    const runtime = runtimeRef.current;
+    if (!runtime) return;
+    const focus = overlayFocusWgs84
+      ? proj4('EPSG:4326', 'EPSG:2154', [overlayFocusWgs84[0], overlayFocusWgs84[1]]) as [number, number]
+      : undefined;
+    frameCamera(runtime, viewPreset, focus);
+  }, [overlayFocusWgs84, viewPreset]);
   useEffect(() => { runtimeRef.current?.refreshDetails(); }, [detailLodEnabled]);
 
   useEffect(() => {
@@ -677,7 +687,8 @@ export function TiledSpatialScene3D({
         const runtime: Runtime = { instance, controls, overlays, origin: catalog.origin_l93_m, catalog, refreshDetails: scheduleRefresh };
         runtimeRef.current = runtime; redrawOverlays(runtime, propsRef.current.overlayPoints, [...propsRef.current.overlayLines, ...projectWgs84OverlayLines(runtime.origin, propsRef.current.overlayWgs84Lines)], projectWgs84OverlayPolygons(runtime.origin, propsRef.current.overlayWgs84Polygons));
         let focus: readonly [number, number] | undefined;
-        if (overlayOriginWgs84) focus = proj4('EPSG:4326', 'EPSG:2154', [overlayOriginWgs84[0], overlayOriginWgs84[1]]) as [number, number];
+        const focusWgs84 = propsRef.current.overlayFocusWgs84 ?? overlayOriginWgs84;
+        if (focusWgs84) focus = proj4('EPSG:4326', 'EPSG:2154', [focusWgs84[0], focusWgs84[1]]) as [number, number];
         frameCamera(runtime, propsRef.current.viewPreset, focus); scheduleRefresh(); setStatus('ready');
       } catch (error) {
         if (!disposed && !abortController.signal.aborted) { console.error(error); setStatus('error'); }
