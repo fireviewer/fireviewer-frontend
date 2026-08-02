@@ -49,19 +49,27 @@ function Disclosure({ title, description, icon, summary, className = '', childre
 
 function Timeline({ view }: { readonly view: PublicIncidentView }) {
   const groups = useMemo(() => {
-    const map = new Map<string, PublicIncidentView['timeline']>();
+    const map = new Map<string, { readonly id: string; readonly occurred_at: string; readonly label: string }[]>();
     for (const item of view.timeline) {
       const key = item.occurred_at.slice(0, 10);
-      map.set(key, [...(map.get(key) ?? []), item]);
+      map.set(key, [...(map.get(key) ?? []), { id: `timeline-${item.occurred_at}-${item.label}`, occurred_at: item.occurred_at, label: item.label }]);
+    }
+    for (const intelligence of view.daily_intelligence ?? []) {
+      const key = intelligence.local_date;
+      map.set(key, [...(map.get(key) ?? []), {
+        id: `analysis-${intelligence.analysis_id}`,
+        occurred_at: intelligence.published_at,
+        label: `Synthèse quotidienne et calques publiés : ${intelligence.report.title}`,
+      }]);
     }
     return [...map.entries()].sort(([a], [b]) => b.localeCompare(a));
-  }, [view.timeline]);
+  }, [view.daily_intelligence, view.timeline]);
   const [selected, setSelected] = useState<string | null>(null);
   const active = selected ?? groups[0]?.[0] ?? null;
   const activeEntries = groups.find(([key]) => key === active)?.[1] ?? [];
   if (!groups.length) return null;
   const publicationCount = groups.reduce((total, [, entries]) => total + entries.length, 0);
-  return <Disclosure className="fw-incident-disclosure--timeline" title="Évolution publiée" description="Les faits affichés correspondent aux informations rendues publiques." icon="calendar" summary={`${groups.length} jours · ${publicationCount} publications`}><section className="fw-incident-timeline" aria-label="Évolution publiée">{groups.length > 1 ? <div className="fw-incident-date-picker" aria-label="Choisir une journée">{groups.map(([key, entries]) => <button key={key} type="button" className={key === active ? 'is-active' : undefined} aria-pressed={key === active} onClick={() => setSelected(key)}>{new Intl.DateTimeFormat('fr-FR', { day: '2-digit', month: 'short', timeZone: 'Europe/Paris' }).format(new Date(`${key}T12:00:00Z`))}{entries.length > 1 ? ` · ${entries.length}` : ''}</button>)}</div> : null}<h3>{active ? day(active) : ''}</h3><ol>{activeEntries.map((item, index) => <li key={`${item.occurred_at}-${index}`}><time dateTime={item.occurred_at}>{hour(item.occurred_at)}</time><span>{item.label}</span></li>)}</ol></section></Disclosure>;
+  return <Disclosure className="fw-incident-disclosure--timeline" title="Évolution publiée" description="Synthèses journalières, faits et calques rendus publics." icon="calendar" summary={`${groups.length} jours · ${publicationCount} publications`}><section className="fw-incident-timeline" aria-label="Évolution publiée">{groups.length > 1 ? <div className="fw-incident-date-picker" aria-label="Choisir une journée">{groups.map(([key, entries]) => <button key={key} type="button" className={key === active ? 'is-active' : undefined} aria-pressed={key === active} onClick={() => setSelected(key)}>{new Intl.DateTimeFormat('fr-FR', { day: '2-digit', month: 'short', timeZone: 'Europe/Paris' }).format(new Date(`${key}T12:00:00Z`))}{entries.length > 1 ? ` · ${entries.length}` : ''}</button>)}</div> : null}<h3>{active ? day(active) : ''}</h3><ol>{activeEntries.map((item) => <li key={item.id}><time dateTime={item.occurred_at}>{hour(item.occurred_at)}</time><span>{item.label}</span></li>)}</ol></section></Disclosure>;
 }
 
 function Metrics({ view }: { readonly view: PublicIncidentView }) {

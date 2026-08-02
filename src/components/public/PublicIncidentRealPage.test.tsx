@@ -117,6 +117,24 @@ it('présente les mises à jour sans inventer de périmètre', async () => {
   expect(screen.queryByText(/longitude/i)).not.toBeInTheDocument();
 });
 
+it('intègre les synthèses quotidiennes publiées dans la chronologie', async () => {
+  const user = userEvent.setup();
+  const chronologicalView: PublicIncidentView = {
+    ...view,
+    daily_intelligence: [spatialDay('2026-07-12', 'analysis-12'), spatialDay('2026-07-13', 'analysis-13')],
+  };
+  render(<PublicIncidentRealPage summary={summary} checkedAt="2026-07-15T10:00:00Z" stale={false} refreshing={false} onRefresh={vi.fn()} detailRequest={Promise.resolve({ view: chronologicalView, error: null })} />);
+  await screen.findByRole('heading', { name: 'Massif test', level: 1 });
+  const timelineSummary = screen.getByText('Évolution publiée').closest('summary');
+  if (!timelineSummary) throw new Error('Évolution publiée doit être dépliable.');
+  expect(timelineSummary).toHaveTextContent('3 jours · 3 publications');
+  await user.click(timelineSummary);
+  const picker = screen.getByLabelText('Choisir une journée');
+  expect(within(picker).getAllByRole('button')).toHaveLength(3);
+  await user.click(within(picker).getByRole('button', { name: '13 juil.' }));
+  expect(screen.getByText(/Synthèse quotidienne et calques publiés : Situation 2026-07-13/)).toBeVisible();
+});
+
 it('replie les repères, les informations opérationnelles et l’évolution par défaut', async () => {
   const publishedView: PublicIncidentView = {
     ...view,
