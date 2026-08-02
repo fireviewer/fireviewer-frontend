@@ -3,6 +3,7 @@ import { Box3, Vector3 } from 'three';
 import { parseTiledSpatialCatalog } from '../../lib/tiledSpatialCatalog';
 import { parseUnitySpatialCatalog } from '../../lib/unitySpatialTile';
 import { terrainOcclusionProbeDistance, tileIsWithinDetailCorridor, tileIsWithinDetailDistance } from '../../lib/spatialVisibility';
+import { projectLambert93Overlay } from '../../lib/spatialOverlayProjection';
 
 const files = {
   'terrain/T00/colour.png': '/api/colour',
@@ -93,6 +94,12 @@ describe('parseUnitySpatialCatalog', () => {
       ...unityCatalog,
       lod_policy: { ...unityCatalog.lod_policy, detail: { ...unityCatalog.lod_policy.detail, maximum_resident_tile_count: 0 } },
     })).toThrow('entier positif');
+  });
+});
+
+describe('projectLambert93Overlay', () => {
+  it('conserve le repère Est-Nord du terrain Unity pour les calques WGS84', () => {
+    expect(projectLambert93Overlay([700_000, 6_600_000, 100], [700_125, 6_600_240])).toEqual([125, 240]);
   });
 });
 

@@ -50,6 +50,7 @@ import {
   type UnityTileGeometry,
 } from '../../lib/unitySpatialTile';
 import { terrainOcclusionProbeDistance, tileIsWithinDetailCorridor } from '../../lib/spatialVisibility';
+import { projectLambert93Overlay } from '../../lib/spatialOverlayProjection';
 
 export interface TiledSceneSource {
   readonly catalogUrl: string;
@@ -328,7 +329,8 @@ function projectWgs84OverlayLines(origin: UnityOrigin, lines: readonly TiledScen
     const points = line.points.flatMap((point) => {
       if (!Number.isFinite(point[0]) || !Number.isFinite(point[1])) return [];
       const projected = proj4('EPSG:4326', 'EPSG:2154', [point[0], point[1]]) as [number, number];
-      return [[projected[0] - origin[0], 0, -(projected[1] - origin[1])] as const];
+      const [east, north] = projectLambert93Overlay(origin, projected);
+      return [[east, 0, north] as const];
     });
     return points.length >= 2 ? [{ points, color: line.color }] : [];
   });
@@ -338,7 +340,7 @@ function projectWgs84OverlayPolygons(origin: UnityOrigin, polygons: readonly Til
   const projectRing = (ring: readonly (readonly [number, number])[]): readonly (readonly [number, number])[] => ring.flatMap((point) => {
     if (!Number.isFinite(point[0]) || !Number.isFinite(point[1])) return [];
     const projected = proj4('EPSG:4326', 'EPSG:2154', [point[0], point[1]]) as [number, number];
-    return [[projected[0] - origin[0], -(projected[1] - origin[1])] as const];
+    return [projectLambert93Overlay(origin, projected)];
   });
   return polygons.flatMap((polygon) => {
     const outer = projectRing(polygon.outer);
