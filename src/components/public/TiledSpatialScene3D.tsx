@@ -20,8 +20,11 @@ import {
   Mesh,
   MeshBasicMaterial,
   MeshLambertMaterial,
+  Path,
   Quaternion,
   Raycaster,
+  Shape,
+  ShapeGeometry,
   SphereGeometry,
   SRGBColorSpace,
   Texture,
@@ -57,7 +60,20 @@ export interface TiledSceneSource {
 export interface TiledScenePoint { readonly position: readonly [number, number, number]; readonly color: string; }
 export interface TiledSceneLine { readonly points: readonly (readonly [number, number, number])[]; readonly color: string; }
 export interface TiledSceneWgs84Line { readonly points: readonly (readonly [number, number])[]; readonly color: string; }
+export interface TiledSceneWgs84Polygon {
+  readonly outer: readonly (readonly [number, number])[];
+  readonly holes?: readonly (readonly (readonly [number, number])[])[];
+  readonly color: string;
+  readonly opacity: number;
+}
 export type TiledSceneViewPreset = 'near' | 'local' | 'extended';
+
+interface TiledScenePolygon {
+  readonly outer: readonly (readonly [number, number])[];
+  readonly holes: readonly (readonly (readonly [number, number])[])[];
+  readonly color: string;
+  readonly opacity: number;
+}
 
 interface Runtime {
   readonly instance: Instance;
@@ -318,8 +334,45 @@ function projectWgs84OverlayLines(origin: UnityOrigin, lines: readonly TiledScen
   });
 }
 
-function redrawOverlays(runtime: Runtime, points: readonly TiledScenePoint[], lines: readonly TiledSceneLine[]): void {
+function projectWgs84OverlayPolygons(origin: UnityOrigin, polygons: readonly TiledSceneWgs84Polygon[]): readonly TiledScenePolygon[] {
+  const projectRing = (ring: readonly (readonly [number, number])[]): readonly (readonly [number, number])[] => ring.flatMap((point) => {
+    if (!Number.isFinite(point[0]) || !Number.isFinite(point[1])) return [];
+    const projected = proj4('EPSG:4326', 'EPSG:2154', [point[0], point[1]]) as [number, number];
+    return [[projected[0] - origin[0], -(projected[1] - origin[1])] as const];
+  });
+  return polygons.flatMap((polygon) => {
+    const outer = projectRing(polygon.outer);
+    if (outer.length < 3) return [];
+    return [{ outer, holes: (polygon.holes ?? []).map(projectRing).filter((hole) => hole.length >= 3), color: polygon.color, opacity: polygon.opacity }];
+  });
+}
+
+function pathFromRing(path: Path, ring: readonly (readonly [number, number])[]): void {
+  const [first, ...rest] = ring;
+  if (!first) return;
+  path.moveTo(first[0], first[1]);
+  for (const point of rest) path.lineTo(point[0], point[1]);
+  path.closePath();
+}
+
+function redrawOverlays(runtime: Runtime, points: readonly TiledScenePoint[], lines: readonly TiledSceneLine[], polygons: readonly TiledScenePolygon[] = []): void {
   disposeObject(runtime.overlays); runtime.overlays.clear();
+  for (const item of polygons) {
+    const shape = new Shape();
+    pathFromRing(shape, item.outer);
+    for (const ring of item.holes) {
+      const hole = new Path();
+      pathFromRing(hole, ring);
+      shape.holes.push(hole);
+    }
+    const surface = new Mesh(
+      new ShapeGeometry(shape),
+      new MeshBasicMaterial({ color: item.color, side: DoubleSide, transparent: true, opacity: item.opacity, depthTest: false, depthWrite: false }),
+    );
+    surface.position.z = 4;
+    surface.renderOrder = 18;
+    runtime.overlays.add(surface);
+  }
   for (const item of points) {
     const marker = new Mesh(new SphereGeometry(10, 14, 10), new MeshBasicMaterial({ color: item.color, depthTest: false }));
     marker.position.copy(overlayWorld(runtime.origin, item.position, 8)); marker.renderOrder = 20; runtime.overlays.add(marker);
@@ -359,6 +412,7 @@ export function TiledSpatialScene3D({
   overlayPoints = [],
   overlayLines = [],
   overlayWgs84Lines = [],
+  overlayWgs84Polygons = [],
 }: {
   readonly source: TiledSceneSource;
   readonly overlayOriginWgs84?: readonly [number, number, number];
@@ -369,16 +423,17 @@ export function TiledSpatialScene3D({
   readonly overlayPoints?: readonly TiledScenePoint[];
   readonly overlayLines?: readonly TiledSceneLine[];
   readonly overlayWgs84Lines?: readonly TiledSceneWgs84Line[];
+  readonly overlayWgs84Polygons?: readonly TiledSceneWgs84Polygon[];
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const runtimeRef = useRef<Runtime | null>(null);
   const [detailLodEnabled, setDetailLodEnabled] = useState(true);
-  const propsRef = useRef({ overlayPoints, overlayLines, overlayWgs84Lines, onPick, drawMode, cameraMode, detailLodEnabled, viewPreset });
+  const propsRef = useRef({ overlayPoints, overlayLines, overlayWgs84Lines, overlayWgs84Polygons, onPick, drawMode, cameraMode, detailLodEnabled, viewPreset });
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [detailState, setDetailState] = useState({ active: 0, expected: 0, failures: 0 });
-  propsRef.current = { overlayPoints, overlayLines, overlayWgs84Lines, onPick, drawMode, cameraMode, detailLodEnabled, viewPreset };
+  propsRef.current = { overlayPoints, overlayLines, overlayWgs84Lines, overlayWgs84Polygons, onPick, drawMode, cameraMode, detailLodEnabled, viewPreset };
 
-  useEffect(() => { const runtime = runtimeRef.current; if (runtime) redrawOverlays(runtime, overlayPoints, [...overlayLines, ...projectWgs84OverlayLines(runtime.origin, overlayWgs84Lines)]); }, [overlayPoints, overlayLines, overlayWgs84Lines]);
+  useEffect(() => { const runtime = runtimeRef.current; if (runtime) redrawOverlays(runtime, overlayPoints, [...overlayLines, ...projectWgs84OverlayLines(runtime.origin, overlayWgs84Lines)], projectWgs84OverlayPolygons(runtime.origin, overlayWgs84Polygons)); }, [overlayPoints, overlayLines, overlayWgs84Lines, overlayWgs84Polygons]);
   useEffect(() => { const runtime = runtimeRef.current; if (runtime) frameCamera(runtime, viewPreset); }, [viewPreset]);
   useEffect(() => { runtimeRef.current?.refreshDetails(); }, [detailLodEnabled]);
 
@@ -614,7 +669,7 @@ export function TiledSpatialScene3D({
         farRoot = far.root; farRoot.position.z = -3; farTerrain = far.terrain; terrainMeshes.push(far.terrain); await instance.add(farRoot);
         const overlays = new Group(); overlays.name = 'admin-spatial-overlays'; await instance.add(overlays);
         const runtime: Runtime = { instance, controls, overlays, origin: catalog.origin_l93_m, catalog, refreshDetails: scheduleRefresh };
-        runtimeRef.current = runtime; redrawOverlays(runtime, propsRef.current.overlayPoints, [...propsRef.current.overlayLines, ...projectWgs84OverlayLines(runtime.origin, propsRef.current.overlayWgs84Lines)]);
+        runtimeRef.current = runtime; redrawOverlays(runtime, propsRef.current.overlayPoints, [...propsRef.current.overlayLines, ...projectWgs84OverlayLines(runtime.origin, propsRef.current.overlayWgs84Lines)], projectWgs84OverlayPolygons(runtime.origin, propsRef.current.overlayWgs84Polygons));
         let focus: readonly [number, number] | undefined;
         if (overlayOriginWgs84) focus = proj4('EPSG:4326', 'EPSG:2154', [overlayOriginWgs84[0], overlayOriginWgs84[1]]) as [number, number];
         frameCamera(runtime, propsRef.current.viewPreset, focus); scheduleRefresh(); setStatus('ready');

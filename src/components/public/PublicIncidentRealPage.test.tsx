@@ -16,6 +16,18 @@ const view: PublicIncidentView = { schema_version: '1.0', fire_id: 'FR-83-00042'
 afterEach(() => { cleanup(); localStorage.clear(); vi.restoreAllMocks(); });
 function renderPage(pageSummary: ViewerManifestSummary = summary) { return render(<PublicIncidentRealPage summary={pageSummary} checkedAt="2026-07-15T10:00:00Z" stale={false} refreshing={false} onRefresh={vi.fn()} detailRequest={Promise.resolve({ view, error: null })} />); }
 
+function spatialDay(localDate: string, analysisId: string): NonNullable<PublicIncidentView['daily_intelligence']>[number] {
+  return {
+    analysis_id: analysisId,
+    episode_id: 'E01',
+    local_date: localDate,
+    published_at: `${localDate}T12:00:00Z`,
+    report: { report_revision_id: `REPORT-${analysisId}`, revision: 1, title: `Situation ${localDate}`, body_markdown: 'Synthèse contrôlée.', reviewed_at: `${localDate}T11:00:00Z` },
+    facts: [],
+    spatial_results: [],
+  };
+}
+
 it('ouvre un bulletin continu sans charger de scène 3D', async () => {
   const user = userEvent.setup();
   renderPage();
@@ -40,6 +52,35 @@ it('charge la scène seulement après la vue carte puis l’action explicite', a
   expect(await screen.findByTestId('tiled-scene-preset')).toHaveTextContent('Preset near');
   await user.click(screen.getByRole('button', { name: 'Vue étendue' }));
   expect(screen.getByTestId('tiled-scene-preset')).toHaveTextContent('Preset extended');
+});
+
+it('présente toutes les journées spatiales et bascule les deux calques avec la journée choisie', async () => {
+  const user = userEvent.setup();
+  const tiledSummary: ViewerManifestSummary = { ...summary, scene: { package_id: 'test', catalog_url: '/scene/catalog', files: [{ file_id: 1, path: 'terrain.tif', kind: 'COG', url: '/scene/1', sha256: 'a'.repeat(64), size_bytes: 2048, media_type: 'image/tiff' }] }, frame: { origin_wgs84: [5.37, 44.75, 454.2], local_frame: 'ENU', meters_per_unit: 0.01, vertical_datum: 'EPSG:4979' }, modelState: 'available' };
+  const spatialView: PublicIncidentView = {
+    ...view,
+    daily_intelligence: [spatialDay('2026-07-12', 'analysis-12'), spatialDay('2026-07-13', 'analysis-13')],
+    active_fire_zones: [
+      { zone_revision_id: 'active-12', zone_kind: 'active', revision: 1, valid_at: '2026-07-12T12:00:00Z', analysis_id: 'analysis-12', geometry_geojson: { type: 'Polygon', coordinates: [[ [6.1, 43.2], [6.11, 43.2], [6.11, 43.21], [6.1, 43.2] ]] } },
+      { zone_revision_id: 'active-13', zone_kind: 'active', revision: 1, valid_at: '2026-07-13T12:00:00Z', analysis_id: 'analysis-13', geometry_geojson: { type: 'Polygon', coordinates: [[ [6.12, 43.2], [6.13, 43.2], [6.13, 43.21], [6.12, 43.2] ]] } },
+    ],
+    burned_area_zones: [
+      { zone_revision_id: 'burned-12', zone_kind: 'burned', revision: 1, valid_at: '2026-07-12T12:00:00Z', analysis_id: 'analysis-12', geometry_geojson: { type: 'Polygon', coordinates: [[ [6.1, 43.2], [6.11, 43.2], [6.11, 43.21], [6.1, 43.2] ]] } },
+      { zone_revision_id: 'burned-13', zone_kind: 'burned', revision: 1, valid_at: '2026-07-13T12:00:00Z', analysis_id: 'analysis-13', geometry_geojson: { type: 'Polygon', coordinates: [[ [6.12, 43.2], [6.13, 43.2], [6.13, 43.21], [6.12, 43.2] ]] } },
+    ],
+  };
+  render(<PublicIncidentRealPage summary={tiledSummary} checkedAt="2026-07-15T10:00:00Z" stale={false} refreshing={false} onRefresh={vi.fn()} detailRequest={Promise.resolve({ view: spatialView, error: null })} />);
+  await screen.findByRole('heading', { name: 'Massif test', level: 1 });
+  await user.click(screen.getByRole('button', { name: 'Ouvrir la carte' }));
+  await user.click(screen.getByRole('button', { name: 'Ouvrir la vue 3D' }));
+  expect(await screen.findByText('2 journées disponibles · les deux calques changent ensemble')).toBeVisible();
+  const tabs = screen.getAllByRole('tab');
+  expect(tabs).toHaveLength(2);
+  expect(tabs[1]).toHaveAttribute('aria-selected', 'true');
+  await user.click(tabs[0]!);
+  expect(tabs[0]).toHaveAttribute('aria-selected', 'true');
+  expect(screen.getByText('Zone parcourue')).toBeVisible();
+  expect(screen.getByText('Zone active')).toBeVisible();
 });
 
 it('résout les fichiers de scène différés seulement après l’action explicite', async () => {

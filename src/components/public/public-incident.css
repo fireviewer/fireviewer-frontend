@@ -183,6 +183,18 @@
 .fw-map-panel__body { display: grid; gap: 15px; padding: 18px; }
 .fw-map-panel__tools { display: flex; }
 .fw-map-panel__tools button { display: inline-flex; min-height: 36px; padding: 8px 11px; align-items: center; gap: 7px; border: 1px solid var(--fw-line); border-radius: 5px; background: #fff; color: var(--fw-ink); font: inherit; font-size: .7rem; font-weight: 750; cursor: pointer; }
+.fw-map-day-timeline { display: grid; gap: 8px; padding: 12px 12px 8px; color: #d7e0e5; border-top: 1px solid #294253; border-bottom: 1px solid #294253; }
+.fw-map-day-timeline > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.fw-map-day-timeline strong, .fw-map-day-timeline small { display: block; }
+.fw-map-day-timeline strong { color: #fff; font-size: .78rem; }
+.fw-map-day-timeline small, .fw-map-day-timeline > p { margin: 3px 0 0; color: #a8bbc6; font-size: .66rem; }
+.fw-map-day-timeline .fw-incident-date-picker { margin: 0; padding-bottom: 2px; }
+.fw-map-day-timeline .fw-incident-date-picker button { border-color: #51636f; color: #d7e0e5; background: #102a3a; }
+.fw-map-day-timeline .fw-incident-date-picker button.is-active { border-color: var(--fw-orange); color: #fff; background: var(--fw-orange); }
+.fw-map-layer-legend { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; color: #d7e0e5; font-size: .65rem; white-space: nowrap; }
+.fw-map-layer-legend i { font-style: normal; }
+.fw-map-layer-legend .is-burned { color: #dc5b35; }
+.fw-map-layer-legend .is-active { color: #ffca3a; }
 .fw-incident-map-view { display: grid; gap: 14px; }
 .fw-incident-card-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
 .fw-incident-card { padding: 18px; border: 1px solid var(--fw-line); border-radius: 7px; background: rgb(255 255 255 / 72%); }
