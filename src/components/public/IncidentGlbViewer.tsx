@@ -136,6 +136,7 @@ export function IncidentGlbViewer({
   frame,
   terrainSourceYear,
   observations,
+  onStatusChange,
 }: {
   readonly assetUrl: string;
   readonly version: number;
@@ -143,6 +144,7 @@ export function IncidentGlbViewer({
   readonly frame: ViewerManifestFrame | null;
   readonly terrainSourceYear: number | null;
   readonly observations: PublicIncidentView['observations'];
+  readonly onStatusChange?: (status: ViewerLoadState) => void;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const shellRef = useRef<HTMLElement | null>(null);
@@ -160,6 +162,8 @@ export function IncidentGlbViewer({
   const [measurement, setMeasurement] = useState<LocalMeasurement | null>(null);
   const [loadedVersion, setLoadedVersion] = useState<number | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
+
+  useEffect(() => { onStatusChange?.(state); }, [onStatusChange, state]);
 
   useEffect(() => {
     const host = hostRef.current;

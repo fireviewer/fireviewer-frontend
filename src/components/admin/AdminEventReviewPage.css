@@ -1,0 +1,372 @@
+.admin-event-review__toolbar {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  border: 1px solid var(--admin-line, #d9d8d2);
+  border-radius: 6px;
+  background: rgb(255 255 255 / 78%);
+}
+
+.admin-event-review__toolbar label {
+  display: grid;
+  gap: 6px;
+  color: var(--admin-muted, #5b6571);
+  font-size: 0.72rem;
+  font-weight: 760;
+}
+
+.admin-event-review__toolbar select {
+  min-width: 210px;
+  min-height: 40px;
+  padding: 0 10px;
+  border: 1px solid #bfc5c8;
+  border-radius: 6px;
+  color: #102035;
+  background: #fff;
+  font: inherit;
+  font-size: 0.78rem;
+}
+
+.admin-event-review__toolbar p {
+  margin: 0;
+  color: var(--admin-muted, #5b6571);
+  font-size: 0.74rem;
+}
+
+.admin-event-review__layout {
+  display: grid;
+  grid-template-columns: minmax(250px, 310px) minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.admin-event-review__queue {
+  position: sticky;
+  top: 98px;
+  display: grid;
+  max-height: calc(100vh - 126px);
+  gap: 7px;
+  overflow-y: auto;
+}
+
+.admin-event-review__candidate {
+  display: grid;
+  width: 100%;
+  gap: 6px;
+  padding: 13px;
+  border: 1px solid var(--admin-line, #d9d8d2);
+  border-radius: 6px;
+  color: #13263a;
+  background: rgb(255 255 255 / 82%);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.admin-event-review__candidate:hover,
+.admin-event-review__candidate:focus-visible,
+.admin-event-review__candidate.is-selected {
+  border-color: var(--admin-orange, #ec4b12);
+  box-shadow: 0 0 0 2px rgb(236 75 18 / 10%);
+}
+
+.admin-event-review__candidate strong {
+  font-size: 0.8rem;
+}
+.admin-event-review__candidate code {
+  overflow-wrap: anywhere;
+  font-size: 0.68rem;
+}
+.admin-event-review__candidate time {
+  color: var(--admin-muted, #5b6571);
+  font-size: 0.67rem;
+}
+
+.admin-event-review__workspace {
+  min-width: 0;
+}
+.admin-event-review__detail {
+  min-width: 0;
+}
+
+.admin-event-review__detail-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 15px;
+  padding: 17px 19px;
+  border: 1px solid var(--admin-line, #d9d8d2);
+  border-radius: 6px;
+  background: rgb(255 255 255 / 82%);
+}
+
+.admin-event-review__detail-header h3 {
+  margin: 5px 0 3px;
+  font-size: 1.15rem;
+  overflow-wrap: anywhere;
+}
+.admin-event-review__detail-header p {
+  margin: 0;
+  color: var(--admin-muted, #5b6571);
+  font-size: 0.72rem;
+}
+
+.admin-event-review__overview,
+.admin-event-review__action-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.admin-event-review__overview .admin-detail-card dl {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.admin-event-review__viewpoint {
+  border-color: #e2b7a4;
+  background: #fff9f5;
+}
+.admin-event-review__viewpoint > p strong {
+  color: #8b3212;
+}
+
+.admin-event-review__assets,
+.admin-event-review__attempts,
+.admin-event-review__events,
+.admin-event-review__analysis-grid,
+.admin-event-review__history,
+.admin-event-review__action-grid {
+  padding: 18px;
+}
+
+.admin-event-review__assets {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.admin-event-review__asset {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--admin-line, #d9d8d2);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.admin-event-review__asset figcaption {
+  display: grid;
+  gap: 5px;
+  padding: 11px 13px;
+  border-bottom: 1px solid var(--admin-line, #d9d8d2);
+}
+.admin-event-review__asset figcaption strong {
+  font-size: 0.78rem;
+  overflow-wrap: anywhere;
+}
+.admin-event-review__asset figcaption span {
+  color: var(--admin-muted, #5b6571);
+  font-size: 0.67rem;
+}
+.admin-event-review__asset > p {
+  margin: 0;
+  padding: 18px;
+  color: var(--admin-muted, #5b6571);
+  font-size: 0.74rem;
+  line-height: 1.5;
+}
+.admin-event-review__asset img,
+.admin-event-review__asset video {
+  display: block;
+  width: 100%;
+  max-height: 440px;
+  object-fit: contain;
+  background: #111a20;
+}
+
+.admin-event-review__analysis-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.admin-event-review__analysis-grid > div {
+  min-width: 0;
+}
+.admin-event-review__analysis-grid h4,
+.admin-event-review__attempt h4,
+.admin-event-review__event h4 {
+  margin: 0 0 9px;
+  color: #102035;
+  font-size: 0.88rem;
+}
+
+.admin-event-review__json {
+  max-height: 310px;
+  margin: 0;
+  padding: 12px;
+  overflow: auto;
+  border: 1px solid #d7dade;
+  border-radius: 5px;
+  color: #dceaf1;
+  background: #0c1e2b;
+  font:
+    0.69rem/1.55 "IBM Plex Mono",
+    monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.admin-event-review__empty-value {
+  margin: 0;
+  color: var(--admin-muted, #5b6571);
+  font-size: 0.74rem;
+}
+
+.admin-event-review__attempts,
+.admin-event-review__events {
+  display: grid;
+  gap: 13px;
+}
+
+.admin-event-review__attempt,
+.admin-event-review__event {
+  min-width: 0;
+  padding: 15px;
+  border: 1px solid var(--admin-line, #d9d8d2);
+  border-radius: 6px;
+  background: #fff;
+}
+
+.admin-event-review__attempt > header,
+.admin-event-review__event > header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+.admin-event-review__attempt header code,
+.admin-event-review__event header code {
+  font-size: 0.68rem;
+  overflow-wrap: anywhere;
+}
+.admin-event-review__attempt dl,
+.admin-event-review__event dl {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin: 14px 0;
+}
+.admin-event-review__attempt dt,
+.admin-event-review__event dt {
+  color: var(--admin-muted, #5b6571);
+  font-size: 0.61rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+.admin-event-review__attempt dd,
+.admin-event-review__event dd {
+  margin: 4px 0 0;
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
+}
+.admin-event-review__attempt details,
+.admin-event-review__event details {
+  border-top: 1px solid var(--admin-line, #d9d8d2);
+}
+.admin-event-review__attempt summary,
+.admin-event-review__event summary {
+  padding: 11px 0 0;
+  color: #283e52;
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 750;
+}
+.admin-event-review__attempt details h5,
+.admin-event-review__event details h5 {
+  margin: 13px 0 6px;
+  color: var(--admin-muted, #5b6571);
+  font-size: 0.65rem;
+  text-transform: uppercase;
+}
+
+.admin-event-review__decision {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--admin-line, #d9d8d2);
+}
+.admin-event-review__decision label {
+  display: grid;
+  gap: 6px;
+  color: #283e52;
+  font-size: 0.72rem;
+  font-weight: 750;
+}
+.admin-event-review__decision textarea {
+  width: 100%;
+  padding: 9px 10px;
+  border: 1px solid #bfc5c8;
+  border-radius: 6px;
+  resize: vertical;
+  font: inherit;
+}
+.admin-event-review__decision small {
+  color: var(--admin-muted, #5b6571);
+  font-size: 0.67rem;
+  font-weight: 500;
+}
+.admin-event-review__decision .admin-form-actions {
+  margin-top: 10px;
+}
+.admin-event-review__decision > p {
+  margin: 8px 0 0;
+  color: #8b3212;
+  font-size: 0.72rem;
+}
+
+.admin-event-review__actions .admin-detail-card dl {
+  grid-template-columns: 1fr;
+}
+.admin-event-review__readonly {
+  margin: 18px 0;
+  padding: 12px 14px;
+  border-left: 4px solid #5f7182;
+  color: #384e60;
+  background: #f0f3f5;
+  font-size: 0.75rem;
+}
+
+@media (max-width: 1120px) {
+  .admin-event-review__layout {
+    grid-template-columns: 1fr;
+  }
+  .admin-event-review__queue {
+    position: static;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    max-height: 380px;
+  }
+}
+
+@media (max-width: 760px) {
+  .admin-event-review__toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .admin-event-review__toolbar select {
+    width: 100%;
+  }
+  .admin-event-review__queue,
+  .admin-event-review__overview,
+  .admin-event-review__action-grid,
+  .admin-event-review__assets,
+  .admin-event-review__analysis-grid {
+    grid-template-columns: 1fr;
+  }
+  .admin-event-review__attempt dl,
+  .admin-event-review__event dl {
+    grid-template-columns: 1fr;
+  }
+}

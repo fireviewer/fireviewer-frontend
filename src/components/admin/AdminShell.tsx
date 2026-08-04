@@ -1,6 +1,7 @@
 import { FormEvent, MouseEvent, useState, type ReactNode } from 'react';
 import { FireWarningBrand } from '../public/FireWarningPublicShell';
 import { PublicIcon } from '../public/PublicIcon';
+import { isFeatureEnabled } from '../../lib/featureFlags';
 import {
   ADMIN_OPERATIONS,
   ADMIN_ZONE_TOOLS,
@@ -14,7 +15,7 @@ interface AdminShellProps {
   readonly onSignOut?: () => void;
 }
 
-const PRIMARY_OPERATION_IDS = ['dashboard', 'incidents', 'work-queue', 'system'] as const;
+const PRIMARY_OPERATION_IDS = ['dashboard', 'incidents', 'event-review', 'work-queue', 'system'] as const;
 
 function primaryActivePath(pathname: string, resolvedPath: string | null): string | null {
   if (/^\/admin\/(?:zones|publications|rapprochement-spatial|signalements)(?:\/|$)/.test(pathname)) return '/admin/validation';
@@ -43,8 +44,12 @@ export function AdminShell({ children, onSignOut }: AdminShellProps) {
   const activePath = primaryActivePath(currentPath, resolveActiveAdminPath(currentPath));
   const [menuOpen, setMenuOpen] = useState(false);
   const [search, setSearch] = useState('');
+  const eventReviewEnabled = isFeatureEnabled('FV_EVENT_V2_ENABLED') && isFeatureEnabled('FV_SUPABASE_AUTH_ENABLED');
   const operations = [...ADMIN_OPERATIONS, ...ADMIN_ZONE_TOOLS];
-  const primaryOperations = PRIMARY_OPERATION_IDS.map((id) => operations.find((item) => item.id === id)).filter((item): item is AdminOperationDefinition => Boolean(item));
+  const primaryOperations = PRIMARY_OPERATION_IDS
+    .filter((id) => id !== 'event-review' || eventReviewEnabled)
+    .map((id) => operations.find((item) => item.id === id))
+    .filter((item): item is AdminOperationDefinition => Boolean(item));
 
   const followAdminLink = (event: MouseEvent<HTMLDivElement>) => {
     if (

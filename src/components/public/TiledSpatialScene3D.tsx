@@ -58,7 +58,8 @@ export interface TiledSceneSource {
   readonly credentials?: RequestCredentials;
 }
 
-export interface TiledScenePoint { readonly position: readonly [number, number, number]; readonly color: string; }
+export interface TiledScenePoint { readonly position: readonly [number, number, number]; readonly color: string; readonly renderOrder?: number; }
+export interface TiledSceneWgs84Point { readonly position: readonly [number, number]; readonly color: string; readonly renderOrder?: number; }
 export interface TiledSceneLine { readonly points: readonly (readonly [number, number, number])[]; readonly color: string; readonly renderOrder?: number; }
 export interface TiledSceneWgs84Line { readonly points: readonly (readonly [number, number])[]; readonly color: string; readonly renderOrder?: number; }
 export interface TiledSceneWgs84Polygon {
@@ -340,6 +341,15 @@ function projectWgs84OverlayLines(origin: UnityOrigin, lines: readonly TiledScen
   });
 }
 
+function projectWgs84OverlayPoints(origin: UnityOrigin, points: readonly TiledSceneWgs84Point[]): readonly TiledScenePoint[] {
+  return points.flatMap((point) => {
+    if (!Number.isFinite(point.position[0]) || !Number.isFinite(point.position[1])) return [];
+    const projected = proj4('EPSG:4326', 'EPSG:2154', [point.position[0], point.position[1]]) as [number, number];
+    const [east, north] = projectLambert93Overlay(origin, projected);
+    return [{ position: [east, 0, north] as const, color: point.color, renderOrder: point.renderOrder }];
+  });
+}
+
 function projectWgs84OverlayPolygons(origin: UnityOrigin, polygons: readonly TiledSceneWgs84Polygon[]): readonly TiledScenePolygon[] {
   const projectRing = (ring: readonly (readonly [number, number])[]): readonly (readonly [number, number])[] => ring.flatMap((point) => {
     if (!Number.isFinite(point[0]) || !Number.isFinite(point[1])) return [];
@@ -381,7 +391,7 @@ function redrawOverlays(runtime: Runtime, points: readonly TiledScenePoint[], li
   }
   for (const item of points) {
     const marker = new Mesh(new SphereGeometry(10, 14, 10), new MeshBasicMaterial({ color: item.color, depthTest: false }));
-    marker.position.copy(overlayWorld(runtime.origin, item.position, 8)); marker.renderOrder = 20; runtime.overlays.add(marker);
+    marker.position.copy(overlayWorld(runtime.origin, item.position, 8)); marker.renderOrder = item.renderOrder ?? 20; runtime.overlays.add(marker);
   }
   for (const item of lines) {
     if (item.points.length < 2) continue;
@@ -416,10 +426,12 @@ export function TiledSpatialScene3D({
   cameraMode = 'orbit',
   viewPreset = 'near',
   overlayPoints = [],
+  overlayWgs84Points = [],
   overlayLines = [],
   overlayWgs84Lines = [],
   overlayWgs84Polygons = [],
   overlayFocusWgs84,
+  onStatusChange,
 }: {
   readonly source: TiledSceneSource;
   readonly overlayOriginWgs84?: readonly [number, number, number];
@@ -428,21 +440,25 @@ export function TiledSpatialScene3D({
   readonly cameraMode?: 'orbit' | 'fps';
   readonly viewPreset?: TiledSceneViewPreset;
   readonly overlayPoints?: readonly TiledScenePoint[];
+  readonly overlayWgs84Points?: readonly TiledSceneWgs84Point[];
   readonly overlayLines?: readonly TiledSceneLine[];
   readonly overlayWgs84Lines?: readonly TiledSceneWgs84Line[];
   readonly overlayWgs84Polygons?: readonly TiledSceneWgs84Polygon[];
   /** Focus point for the currently represented daily perimeter, in WGS84 longitude/latitude. */
   readonly overlayFocusWgs84?: readonly [number, number];
+  readonly onStatusChange?: (status: 'loading' | 'ready' | 'error') => void;
 }) {
   const hostRef = useRef<HTMLDivElement>(null);
   const runtimeRef = useRef<Runtime | null>(null);
   const [detailLodEnabled, setDetailLodEnabled] = useState(false);
-  const propsRef = useRef({ overlayPoints, overlayLines, overlayWgs84Lines, overlayWgs84Polygons, overlayFocusWgs84, onPick, drawMode, cameraMode, detailLodEnabled, viewPreset });
+  const propsRef = useRef({ overlayPoints, overlayWgs84Points, overlayLines, overlayWgs84Lines, overlayWgs84Polygons, overlayFocusWgs84, onPick, drawMode, cameraMode, detailLodEnabled, viewPreset });
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [detailState, setDetailState] = useState({ active: 0, expected: 0, failures: 0 });
-  propsRef.current = { overlayPoints, overlayLines, overlayWgs84Lines, overlayWgs84Polygons, overlayFocusWgs84, onPick, drawMode, cameraMode, detailLodEnabled, viewPreset };
+  propsRef.current = { overlayPoints, overlayWgs84Points, overlayLines, overlayWgs84Lines, overlayWgs84Polygons, overlayFocusWgs84, onPick, drawMode, cameraMode, detailLodEnabled, viewPreset };
 
-  useEffect(() => { const runtime = runtimeRef.current; if (runtime) redrawOverlays(runtime, overlayPoints, [...overlayLines, ...projectWgs84OverlayLines(runtime.origin, overlayWgs84Lines)], projectWgs84OverlayPolygons(runtime.origin, overlayWgs84Polygons)); }, [overlayPoints, overlayLines, overlayWgs84Lines, overlayWgs84Polygons]);
+  useEffect(() => { onStatusChange?.(status); }, [onStatusChange, status]);
+
+  useEffect(() => { const runtime = runtimeRef.current; if (runtime) redrawOverlays(runtime, [...overlayPoints, ...projectWgs84OverlayPoints(runtime.origin, overlayWgs84Points)], [...overlayLines, ...projectWgs84OverlayLines(runtime.origin, overlayWgs84Lines)], projectWgs84OverlayPolygons(runtime.origin, overlayWgs84Polygons)); }, [overlayPoints, overlayWgs84Points, overlayLines, overlayWgs84Lines, overlayWgs84Polygons]);
   useEffect(() => {
     const runtime = runtimeRef.current;
     if (!runtime) return;
@@ -685,7 +701,7 @@ export function TiledSpatialScene3D({
         farRoot = far.root; farRoot.position.z = -3; farTerrain = far.terrain; terrainMeshes.push(far.terrain); await instance.add(farRoot);
         const overlays = new Group(); overlays.name = 'admin-spatial-overlays'; await instance.add(overlays);
         const runtime: Runtime = { instance, controls, overlays, origin: catalog.origin_l93_m, catalog, refreshDetails: scheduleRefresh };
-        runtimeRef.current = runtime; redrawOverlays(runtime, propsRef.current.overlayPoints, [...propsRef.current.overlayLines, ...projectWgs84OverlayLines(runtime.origin, propsRef.current.overlayWgs84Lines)], projectWgs84OverlayPolygons(runtime.origin, propsRef.current.overlayWgs84Polygons));
+        runtimeRef.current = runtime; redrawOverlays(runtime, [...propsRef.current.overlayPoints, ...projectWgs84OverlayPoints(runtime.origin, propsRef.current.overlayWgs84Points)], [...propsRef.current.overlayLines, ...projectWgs84OverlayLines(runtime.origin, propsRef.current.overlayWgs84Lines)], projectWgs84OverlayPolygons(runtime.origin, propsRef.current.overlayWgs84Polygons));
         let focus: readonly [number, number] | undefined;
         const focusWgs84 = propsRef.current.overlayFocusWgs84 ?? overlayOriginWgs84;
         if (focusWgs84) focus = proj4('EPSG:4326', 'EPSG:2154', [focusWgs84[0], focusWgs84[1]]) as [number, number];

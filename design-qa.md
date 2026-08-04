@@ -1,8 +1,8 @@
-# Design QA - interface publique FireWarning
+# Design QA — interface publique FireViewer
 
 ## Références
 
-- Accueil : rendu desktop et mobile fourni dans `firewarning-homepage(1).zip`.
+- Accueil : rendu desktop et mobile fourni dans `firewarning-homepage(1).zip`. Ce nom d’archive historique est conservé comme identifiant immuable ; il ne désigne pas la marque publique actuelle.
 - Pages de base : six maquettes desktop/mobile fournies pour Compte, Réglages, Fonctionnement, Confidentialité, Accessibilité et Mentions légales.
 - Direction artistique : papier clair texturé, encre bleu nuit, accent orange, photographie d'orage et d'incendie contenue dans les heroes.
 

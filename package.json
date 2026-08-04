@@ -17,6 +17,7 @@
     "@fontsource-variable/source-serif-4": "^5.2.9",
     "@fontsource/ibm-plex-mono": "^5.2.7",
     "@giro3d/giro3d": "^2.0.3",
+    "@supabase/supabase-js": "2.112.0",
     "@vercel/blob": "^2.6.1",
     "ol": "^10.8.0",
     "proj4": "^2.19.0",

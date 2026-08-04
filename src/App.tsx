@@ -5,6 +5,7 @@ import {
   FireWarningAddEvidencePage,
   FireWarningContributionTrackingPage,
   FireWarningIncidentErrorPage,
+  FireWarningReportPage,
 } from './components/public/FireWarningContributionPages';
 import { PublicIncidentRealPage } from './components/public/PublicIncidentRealPage';
 import {
@@ -22,8 +23,25 @@ import { getDataMode, isAbortError, loadViewerManifest } from './lib/manifestCli
 import { loadPublicIncidentView, type PublicIncidentView } from './lib/publicIncidentView';
 import { VIEWER_MANIFEST_FIRE_ID_RE, type ViewerManifestSummary } from './lib/viewerManifest';
 import { resolveAppRoute } from './routing';
+import { isFeatureEnabled } from './lib/featureFlags';
 
 const AdminApp = lazy(() => import('./components/admin/AdminApp'));
+const EventCandidateContributionPage = lazy(async () => {
+  const module = await import('./components/public/EventCandidatePages');
+  return { default: module.EventCandidateContributionPage };
+});
+const MyEventCandidatesPage = lazy(async () => {
+  const module = await import('./components/public/EventCandidatePages');
+  return { default: module.MyEventCandidatesPage };
+});
+const SupabaseAccountPage = lazy(async () => {
+  const module = await import('./components/public/SupabaseAccountPages');
+  return { default: module.SupabaseAccountPage };
+});
+const SupabasePasswordUpdatePage = lazy(async () => {
+  const module = await import('./components/public/SupabaseAccountPages');
+  return { default: module.SupabasePasswordUpdatePage };
+});
 
 const LIVE_REFRESH_INTERVAL_MS = 300_000;
 const E2E_REFRESH_INTERVAL_MS = 100;
@@ -305,7 +323,7 @@ function PublicZoneRetiredScreen() {
 
 function PublicPage({ section }: { readonly section: Extract<ReturnType<typeof resolveAppRoute>, { kind: 'public-page' }>['section'] }) {
   const content = section === 'incidents' ? <FireWarningIncidentsPage />
-    : section === 'account' ? <AccountPage />
+    : section === 'account' ? (isFeatureEnabled('FV_SUPABASE_AUTH_ENABLED') ? <SupabaseAccountPage /> : <AccountPage />)
         : section === 'settings' ? <SettingsPage />
           : section === 'operation' ? <OperationPage />
             : section === 'privacy' ? <PrivacyPage />
@@ -316,6 +334,7 @@ function PublicPage({ section }: { readonly section: Extract<ReturnType<typeof r
 
 export default function App({ refreshIntervalMs }: AppProps) {
   const [route, setRoute] = useState(() => resolveAppRoute());
+  const eventV2Enabled = isFeatureEnabled('FV_EVENT_V2_ENABLED') && isFeatureEnabled('FV_SUPABASE_AUTH_ENABLED');
   useEffect(() => {
     const updateRoute = () => setRoute(resolveAppRoute());
     window.addEventListener('popstate', updateRoute);
@@ -329,12 +348,16 @@ export default function App({ refreshIntervalMs }: AppProps) {
   const publicContent = route.kind === 'public-zone-retired' ? <PublicZoneRetiredScreen />
     : route.kind === 'home' ? <PublicSiteShell section="home"><FireWarningHomePage /></PublicSiteShell>
       : route.kind === 'public-page' ? <PublicPage section={route.section} />
-        : route.kind === 'public-add-evidence' ? <PublicSiteShell section="incident"><FireWarningAddEvidencePage fireId={route.fireId} /></PublicSiteShell>
+        : route.kind === 'public-account-recovery' ? <PublicSiteShell section="account"><SupabaseAccountPage initialMode="recovery" /></PublicSiteShell>
+          : route.kind === 'public-password-update' ? <PublicSiteShell section="account"><SupabasePasswordUpdatePage /></PublicSiteShell>
+            : route.kind === 'public-event-contribution' ? <PublicSiteShell section="incident">{eventV2Enabled ? <EventCandidateContributionPage /> : <FireWarningReportPage />}</PublicSiteShell>
+              : route.kind === 'public-my-event-candidates' ? <PublicSiteShell section="account"><MyEventCandidatesPage candidateId={route.candidateId} /></PublicSiteShell>
+                : route.kind === 'public-add-evidence' ? <PublicSiteShell section="incident">{eventV2Enabled ? <EventCandidateContributionPage incidentId={route.fireId} /> : <FireWarningAddEvidencePage fireId={route.fireId} />}</PublicSiteShell>
           : route.kind === 'public-incident-report' ? <PublicSiteShell section="incident"><FireWarningIncidentErrorPage fireId={route.fireId} /></PublicSiteShell>
             : route.kind === 'public-contribution' ? <PublicSiteShell section="account"><FireWarningContributionTrackingPage contributionId={route.contributionId} /></PublicSiteShell>
               : route.kind === 'public-incident-address-required' ? <PublicSiteShell section="incident"><PublicIncidentAddressRequiredScreen /></PublicSiteShell>
                 : getDataMode() !== 'api' ? <EmptyIncidentPreview fireId={route.fireId} />
                   : <LiveManifestApp fireId={route.fireId} refreshIntervalMs={refreshIntervalMs} />;
 
-  return publicContent;
+  return <Suspense fallback={<div className="fw-page" role="status">Chargement de la page…</div>}>{publicContent}</Suspense>;
 }

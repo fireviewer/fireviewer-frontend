@@ -319,3 +319,38 @@
   .fw-incident-secondary > *:last-child { grid-column: 1 / -1; }
   .fw-incident-side-panel { top: 62px; }
 }
+.fw-spatial-fallback-2d { display: grid; gap: 1rem; padding: 1rem; min-height: 360px; background: #102b31; color: #fff; }
+.fw-spatial-fallback-2d header { display: flex; justify-content: space-between; gap: 1rem; align-items: start; }
+.fw-spatial-fallback-2d h3, .fw-spatial-fallback-2d p { margin: 0; }
+.fw-spatial-fallback-2d p { color: #d1ded9; }
+.fw-spatial-fallback-2d svg { width: 100%; min-height: 280px; border-radius: 10px; background: linear-gradient(135deg, #173b40, #0b2025); }
+.fw-map-panel__tools button.is-active { background: #173d35; color: #fff; }
+.fw-map-layer-legend .is-event-uncertainty { color: #76c7e8; }
+.fw-public-event-timeline { display: grid; gap: 16px; padding: 20px; border: 1px solid var(--fw-line); border-radius: 8px; background: #fff; box-shadow: 0 8px 24px rgb(4 20 33 / 5%); }
+.fw-public-event-timeline > header { display: flex; justify-content: space-between; align-items: flex-start; gap: 18px; }
+.fw-public-event-timeline > header span { color: var(--fw-orange); font-size: .68rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }
+.fw-public-event-timeline > header h2 { margin: 3px 0 5px; font-size: 1.15rem; }
+.fw-public-event-timeline > header p { margin: 0; color: var(--fw-muted); font-size: .75rem; }
+.fw-public-event-timeline > header small { flex: 0 0 auto; padding: 6px 9px; border-radius: 999px; color: #31515d; background: #e7f2f2; font-size: .66rem; font-weight: 750; }
+.fw-public-event-timeline__controls { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
+.fw-public-event-timeline__instants { display: flex; min-width: 0; gap: 7px; overflow-x: auto; }
+.fw-public-event-timeline__instants button, .fw-public-event-timeline__controls > button { flex: 0 0 auto; min-height: 37px; padding: 7px 10px; border: 1px solid var(--fw-line); border-radius: 5px; color: var(--fw-ink); background: #fff; font: inherit; font-size: .7rem; font-weight: 750; cursor: pointer; }
+.fw-public-event-timeline__controls > button { display: inline-flex; align-items: center; gap: 6px; }
+.fw-public-event-timeline__instants button.is-active, .fw-public-event-timeline__controls > button.is-active { color: #fff; border-color: var(--fw-orange); background: var(--fw-orange); }
+.fw-public-event-timeline__selection { padding-top: 13px; border-top: 1px solid var(--fw-line); }
+.fw-public-event-timeline__selection h3 { margin: 0 0 10px; font-size: .9rem; }
+.fw-public-event-timeline__selection ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.fw-public-event-timeline__selection li { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 10px; padding: 11px 12px; border-left: 3px solid var(--fw-orange); border-radius: 4px; background: #f7faf9; }
+.fw-public-event-timeline__selection li svg { margin-top: 2px; color: var(--fw-orange); }
+.fw-public-event-timeline__selection li div { display: grid; gap: 2px; }
+.fw-public-event-timeline__selection li strong { font-size: .78rem; }
+.fw-public-event-timeline__selection li span, .fw-public-event-timeline__selection li small, .fw-public-event-timeline__empty { color: var(--fw-muted); font-size: .7rem; }
+.fw-public-event-timeline__empty { margin: 0; }
+
+@media (max-width: 760px) {
+  .fw-public-event-timeline { padding: 15px; }
+  .fw-public-event-timeline > header, .fw-public-event-timeline__controls { display: grid; }
+  .fw-public-event-timeline > header small { width: fit-content; }
+  .fw-public-event-timeline__controls > button { width: fit-content; }
+  .fw-spatial-fallback-2d header { display: grid; }
+}

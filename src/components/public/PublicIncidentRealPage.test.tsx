@@ -6,14 +6,37 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { PublicIncidentRealPage } from './PublicIncidentRealPage';
 import type { PublicIncidentView } from '../../lib/publicIncidentView';
 import type { ViewerManifestSummary } from '../../lib/viewerManifest';
+import { loadPublicIncidentEventTimeline, type PublicIncidentEventTimeline } from '../../lib/publicEventTimeline';
 
-vi.mock('./TiledSpatialScene3D', () => ({ TiledSpatialScene3D: ({ viewPreset, overlayWgs84Polygons = [], overlayFocusWgs84 }: { readonly viewPreset: string; readonly overlayWgs84Polygons?: readonly { readonly color: string; readonly elevation?: number; readonly renderOrder?: number }[]; readonly overlayFocusWgs84?: readonly [number, number] }) => <div data-testid="tiled-scene-preset" data-polygon-layers={overlayWgs84Polygons.map((item) => `${item.color}:${item.elevation ?? 4}:${item.renderOrder ?? 18}`).join(',')} data-overlay-focus={overlayFocusWgs84?.join(',') ?? ''}>Preset {viewPreset}</div> }));
+vi.mock('./TiledSpatialScene3D', () => ({ TiledSpatialScene3D: ({ viewPreset, overlayWgs84Points = [], overlayWgs84Lines = [], overlayWgs84Polygons = [], overlayFocusWgs84 }: { readonly viewPreset: string; readonly overlayWgs84Points?: readonly unknown[]; readonly overlayWgs84Lines?: readonly unknown[]; readonly overlayWgs84Polygons?: readonly { readonly color: string; readonly elevation?: number; readonly renderOrder?: number }[]; readonly overlayFocusWgs84?: readonly [number, number] }) => <div data-testid="tiled-scene-preset" data-event-points={overlayWgs84Points.length} data-event-lines={overlayWgs84Lines.length} data-polygon-layers={overlayWgs84Polygons.map((item) => `${item.color}:${item.elevation ?? 4}:${item.renderOrder ?? 18}`).join(',')} data-overlay-focus={overlayFocusWgs84?.join(',') ?? ''}>Preset {viewPreset}</div> }));
 vi.mock('../../lib/publicSpatialScene', () => ({ loadPublicSpatialScene: vi.fn() }));
 vi.mock('../../lib/manifestClient', () => ({ getViewerManifestApiOrigin: () => 'https://api.firewarning.test' }));
+vi.mock('../../lib/publicEventTimeline', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../../lib/publicEventTimeline')>(),
+  loadPublicIncidentEventTimeline: vi.fn(),
+}));
 
 const summary: ViewerManifestSummary = { schemaVersion: '2.0', fireId: 'FR-83-00042', episodeId: 'E01', statusCode: 'MONITORING', validatedAt: null, reviewRequired: false, location: null, asset: null, scene: null, frame: null, freshness: { incident_at: '2026-07-15T10:00:00Z', terrain_source_year: null, generated_at: null }, modelState: 'not_available', publicNotice: 'Notice publique.', sources: [], history: [], journal: [] };
 const view: PublicIncidentView = { schema_version: '1.0', fire_id: 'FR-83-00042', canonical_name: 'Massif test', public_note: null, status: 'MONITORING', verification: 'verified', freshness_at: '2026-07-15T10:00:00Z', last_human_validation_at: '2026-07-15T10:02:00Z', location: null, facts: ['Observation validée.'], limitations: ['Donnée datée.'], episodes: [{ episode_id: 'E01', ordinal: 1, status: 'MONITORING', verification_state: 'VERIFIED', corroborating_source_count: 1, evidence_basis_at: '2026-07-15T10:00:00Z', estimated_area_ha: 12, evacuation_established: false, model_generation_eligible: true, review_required: false, started_at: '2026-07-15T09:00:00Z', last_observed_at: '2026-07-15T10:00:00Z', validated_at: '2026-07-15T10:02:00Z', ended_at: null, is_current: true, version: 1 }], observations: [{ observation_id: 'O-1', episode_id: 'E01', type: 'institutional', observed_at: '2026-07-15T10:00:00Z', received_at: '2026-07-15T10:01:00Z', uncertainty_m: 250, area_label: 'Massif test', verification_state: 'VERIFIED', spatial_mode: 'WITHHELD' }], evidence_projections: [{ projection_id: 'P-1', episode_id: 'E01', kind: 'validated_marker', verification_state: 'VERIFIED', center: { coordinates: [6.1, 43.2], horizontal_uncertainty_m: 25 }, radius_m: 25, label: 'Image utilisateur validée', observed_at: '2026-07-15T10:00:00Z' }], sources: [], timeline: [{ occurred_at: '2026-07-15T10:00:00Z', kind: 'observation', label: 'Observation validée', episode_id: 'E01' }], model: { state: 'not_available', version: null, sha256: null, size_bytes: null, lod: null, terrain_source_year: null, generated_at: null, public_download_available: false, limitations: [] }, downloads: [] };
-afterEach(() => { cleanup(); localStorage.clear(); vi.restoreAllMocks(); });
+const eventTimeline: PublicIncidentEventTimeline = {
+  incident_id: 'FR-83-00042',
+  revision: 2,
+  events: [{
+    event_id: 'FAE-1', state: 'EDITOR_PUBLISHED', phenomenon_kind: 'active_fire', observed_start_at: '2026-07-15T10:00:00Z', observed_end_at: null,
+    geometry: { type: 'Point', coordinates: [6.1, 43.2] },
+    uncertainty: { type: 'Polygon', coordinates: [[[6.09, 43.19], [6.11, 43.19], [6.11, 43.21], [6.09, 43.19]]] },
+    method: 'triangulation', publication_revision: 1,
+  }, {
+    event_id: 'FAE-2', state: 'EDITOR_PUBLISHED', phenomenon_kind: 'visible_front', observed_start_at: '2026-07-15T11:00:00Z', observed_end_at: null,
+    geometry: { type: 'LineString', coordinates: [[6.12, 43.2], [6.13, 43.21]] },
+    uncertainty: { type: 'Polygon', coordinates: [
+      [[6.11, 43.19], [6.14, 43.19], [6.14, 43.22], [6.11, 43.22], [6.11, 43.19]],
+      [[6.12, 43.2], [6.13, 43.2], [6.13, 43.21], [6.12, 43.21], [6.12, 43.2]],
+    ] },
+    method: 'terrain_raycast', publication_revision: 2,
+  }],
+};
+afterEach(() => { cleanup(); localStorage.clear(); vi.mocked(loadPublicIncidentEventTimeline).mockReset(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 function renderPage(pageSummary: ViewerManifestSummary = summary) { return render(<PublicIncidentRealPage summary={pageSummary} checkedAt="2026-07-15T10:00:00Z" stale={false} refreshing={false} onRefresh={vi.fn()} detailRequest={Promise.resolve({ view, error: null })} />); }
 
 function spatialDay(localDate: string, analysisId: string): NonNullable<PublicIncidentView['daily_intelligence']>[number] {
@@ -265,4 +288,202 @@ it('désactive la 3D sans retirer les informations publiques', async () => {
   await user.click(screen.getByRole('button', { name: 'Faible connexion' }));
   expect(screen.getByRole('heading', { name: 'Vue 3D désactivée' })).toBeVisible();
   expect(localStorage.getItem('firewarning-low-data')).toBe('true');
+});
+
+it('ouvre la 3D en mode principal et conserve un repli 2D sans viewpoint privé', async () => {
+  vi.stubEnv('VITE_FV_3D_PRIMARY_ENABLED', 'true');
+  vi.stubGlobal('WebGLRenderingContext', class WebGLRenderingContext {});
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => ({} as never));
+  const user = userEvent.setup();
+  const tiledSummary: ViewerManifestSummary = { ...summary, scene: { package_id: 'test', catalog_url: '/scene/catalog', files: [{ file_id: 1, path: 'terrain.tif', kind: 'COG', url: '/scene/1', sha256: 'a'.repeat(64), size_bytes: 2048, media_type: 'image/tiff' }] }, frame: { origin_wgs84: [5.37, 44.75, 454.2], local_frame: 'ENU', meters_per_unit: 0.01, vertical_datum: 'EPSG:4979' }, modelState: 'available' };
+  const spatialView: PublicIncidentView = {
+    ...view,
+    daily_intelligence: [spatialDay('2026-07-15', 'analysis-15')],
+    active_fire_zones: [{ zone_revision_id: 'active-15', zone_kind: 'active', revision: 1, valid_at: '2026-07-15T12:00:00Z', analysis_id: 'analysis-15', geometry_geojson: { type: 'Polygon', coordinates: [[[6.1, 43.2], [6.11, 43.2], [6.11, 43.21], [6.1, 43.2]]] } }],
+  };
+  render(<PublicIncidentRealPage summary={tiledSummary} checkedAt="2026-07-15T10:00:00Z" stale={false} refreshing={false} onRefresh={vi.fn()} detailRequest={Promise.resolve({ view: spatialView, error: null })} />);
+  await screen.findByRole('heading', { name: 'Massif test', level: 1 });
+  await user.click(screen.getByRole('button', { name: 'Ouvrir la carte' }));
+  expect(await screen.findByTestId('tiled-scene-preset')).toBeVisible();
+  expect(screen.queryByText(/point de prise de vue/i)).not.toBeInTheDocument();
+  await user.click(screen.getByRole('button', { name: 'Vue 2D' }));
+  expect(screen.getByRole('heading', { name: 'Carte 2D de secours' })).toBeVisible();
+  expect(screen.getByRole('img', { name: /géométries publiées/ })).toBeVisible();
+});
+
+it('ne charge pas la timeline v2 tant que les deux flags de publication ne sont pas actifs', async () => {
+  vi.stubEnv('VITE_FV_EVENT_V2_ENABLED', 'true');
+  vi.stubEnv('VITE_FV_V2_PUBLICATION_ENABLED', 'false');
+
+  renderPage();
+
+  await screen.findByRole('heading', { name: 'Massif test', level: 1 });
+  expect(loadPublicIncidentEventTimeline).not.toHaveBeenCalled();
+  expect(screen.getByText('Évolution publiée')).toBeVisible();
+  expect(screen.queryByRole('heading', { name: 'Progression observée' })).not.toBeInTheDocument();
+});
+
+it('synchronise un même instant et les mêmes géométries entre texte, 3D et secours 2D', async () => {
+  vi.stubEnv('VITE_FV_EVENT_V2_ENABLED', 'true');
+  vi.stubEnv('VITE_FV_V2_PUBLICATION_ENABLED', 'true');
+  vi.stubEnv('VITE_FV_3D_PRIMARY_ENABLED', 'true');
+  vi.stubGlobal('WebGLRenderingContext', class WebGLRenderingContext {});
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => ({} as never));
+  vi.mocked(loadPublicIncidentEventTimeline).mockResolvedValue(eventTimeline);
+  const tiledSummary: ViewerManifestSummary = { ...summary, scene: { package_id: 'test', catalog_url: '/scene/catalog', files: [{ file_id: 1, path: 'terrain.tif', kind: 'COG', url: '/scene/1', sha256: 'a'.repeat(64), size_bytes: 2048, media_type: 'image/tiff' }] }, frame: { origin_wgs84: [5.37, 44.75, 454.2], local_frame: 'ENU', meters_per_unit: 0.01, vertical_datum: 'EPSG:4979' }, modelState: 'available' };
+  const user = userEvent.setup();
+
+  renderPage(tiledSummary);
+
+  const timelinePanel = await screen.findByRole('region', { name: 'Progression observée' });
+  expect(loadPublicIncidentEventTimeline).toHaveBeenCalledWith('FR-83-00042', expect.anything());
+  expect(within(timelinePanel).getByText('Portion de front visible')).toBeVisible();
+  expect(document.body).not.toHaveTextContent(/viewpoint|evidence_asset_ids|point de prise de vue/i);
+  await user.click(screen.getByRole('button', { name: 'Ouvrir la carte' }));
+  const scene = await screen.findByTestId('tiled-scene-preset');
+  expect(scene).toHaveAttribute('data-event-points', '0');
+  expect(scene).toHaveAttribute('data-event-lines', '1');
+  expect(scene).toHaveAttribute('data-polygon-layers', expect.stringContaining('#ffca3a:6:26'));
+
+  await user.click(screen.getByRole('button', { name: 'Vue 2D' }));
+  const latestFallback = screen.getByRole('img', { name: /géométries publiées/ });
+  const uncertaintyPath = latestFallback.querySelector('path');
+  expect(uncertaintyPath).toHaveAttribute('fill-rule', 'evenodd');
+  expect(uncertaintyPath?.getAttribute('d')?.match(/\bM\b/g)).toHaveLength(2);
+
+  const publicTabs = within(timelinePanel).getAllByRole('tab');
+  await user.click(publicTabs[0]!);
+  expect(within(timelinePanel).getByText('Flamme ou foyer actif')).toBeVisible();
+  expect(within(screen.getByRole('tablist', { name: 'Choisir un instant sur la carte' })).getAllByRole('tab')[0]).toHaveAttribute('aria-selected', 'true');
+
+  const fallback = screen.getByRole('img', { name: /géométries publiées/ });
+  expect(fallback).toHaveAttribute('data-event-points', '1');
+  expect(fallback).toHaveAttribute('data-event-lines', '0');
+  expect(fallback).toHaveAttribute('data-uncertainties', '1');
+  await user.click(within(timelinePanel).getByRole('button', { name: /Incertitudes/ }));
+  expect(fallback).toHaveAttribute('data-uncertainties', '0');
+});
+
+it('conserve la timeline textuelle et la carte 2D complète sans WebGL', async () => {
+  vi.stubEnv('VITE_FV_EVENT_V2_ENABLED', 'true');
+  vi.stubEnv('VITE_FV_V2_PUBLICATION_ENABLED', 'true');
+  vi.stubEnv('VITE_FV_3D_PRIMARY_ENABLED', 'true');
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => null);
+  vi.mocked(loadPublicIncidentEventTimeline).mockResolvedValue(eventTimeline);
+  const tiledSummary: ViewerManifestSummary = { ...summary, scene: { package_id: 'test', catalog_url: '/scene/catalog', files: [{ file_id: 1, path: 'terrain.tif', kind: 'COG', url: '/scene/1', sha256: 'a'.repeat(64), size_bytes: 2048, media_type: 'image/tiff' }] }, frame: { origin_wgs84: [5.37, 44.75, 454.2], local_frame: 'ENU', meters_per_unit: 0.01, vertical_datum: 'EPSG:4979' }, modelState: 'available' };
+  const user = userEvent.setup();
+
+  renderPage(tiledSummary);
+
+  expect(await screen.findByRole('heading', { name: 'Progression observée' })).toBeVisible();
+  expect(await screen.findByText('Portion de front visible')).toBeVisible();
+  await user.click(screen.getByRole('button', { name: 'Ouvrir la carte' }));
+  expect(screen.getByRole('heading', { name: 'Carte 2D de secours' })).toBeVisible();
+  expect(screen.getByRole('img', { name: /géométries publiées/ })).toHaveAttribute('data-event-lines', '1');
+  expect(screen.queryByTestId('tiled-scene-preset')).not.toBeInTheDocument();
+});
+
+it('conserve la chronologie publique existante si la timeline v2 est indisponible', async () => {
+  vi.stubEnv('VITE_FV_EVENT_V2_ENABLED', 'true');
+  vi.stubEnv('VITE_FV_V2_PUBLICATION_ENABLED', 'true');
+  vi.mocked(loadPublicIncidentEventTimeline).mockRejectedValue(new Error('offline'));
+
+  renderPage();
+
+  expect(await screen.findByText(/progression événementielle v2 est indisponible/i)).toBeVisible();
+  expect(screen.getByText('Évolution publiée')).toBeVisible();
+  expect(screen.queryByRole('heading', { name: 'Progression observée' })).not.toBeInTheDocument();
+});
+
+it('considère une timeline v2 publiée vide comme l’état public autoritatif', async () => {
+  vi.stubEnv('VITE_FV_EVENT_V2_ENABLED', 'true');
+  vi.stubEnv('VITE_FV_V2_PUBLICATION_ENABLED', 'true');
+  vi.mocked(loadPublicIncidentEventTimeline).mockResolvedValue({ ...eventTimeline, events: [] });
+
+  renderPage();
+
+  expect(await screen.findByRole('heading', { name: 'Progression observée' })).toBeVisible();
+  expect(screen.getByText(/Aucun événement actif n’est publié/)).toBeVisible();
+  expect(screen.queryByText('Évolution publiée')).not.toBeInTheDocument();
+});
+
+it('recharge la timeline v2 après une nouvelle vérification du manifeste', async () => {
+  vi.stubEnv('VITE_FV_EVENT_V2_ENABLED', 'true');
+  vi.stubEnv('VITE_FV_V2_PUBLICATION_ENABLED', 'true');
+  vi.mocked(loadPublicIncidentEventTimeline)
+    .mockResolvedValueOnce(eventTimeline)
+    .mockResolvedValueOnce({ ...eventTimeline, revision: 3, events: [] });
+  const detailRequest = Promise.resolve({ view, error: null });
+  const props = {
+    summary,
+    stale: false,
+    refreshing: false,
+    onRefresh: vi.fn(),
+    detailRequest,
+  } as const;
+  const rendered = render(<PublicIncidentRealPage {...props} checkedAt="2026-07-15T10:00:00Z" />);
+
+  expect(await screen.findByText('Révision publique 2')).toBeVisible();
+  rendered.rerender(<PublicIncidentRealPage {...props} checkedAt="2026-07-15T10:05:00Z" />);
+
+  expect(await screen.findByText('Révision publique 3')).toBeVisible();
+  expect(loadPublicIncidentEventTimeline).toHaveBeenCalledTimes(2);
+});
+
+it('n’injecte pas les périmètres v1 dans une publication événementielle v2', async () => {
+  vi.stubEnv('VITE_FV_EVENT_V2_ENABLED', 'true');
+  vi.stubEnv('VITE_FV_V2_PUBLICATION_ENABLED', 'true');
+  vi.stubEnv('VITE_FV_3D_PRIMARY_ENABLED', 'true');
+  vi.stubGlobal('WebGLRenderingContext', class WebGLRenderingContext {});
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => ({} as never));
+  vi.mocked(loadPublicIncidentEventTimeline).mockResolvedValue({
+    ...eventTimeline,
+    events: eventTimeline.events.map((event) => event.event_id === 'FAE-2'
+      ? { ...event, observed_start_at: '2026-07-15T22:30:00Z' }
+      : event),
+  });
+  const user = userEvent.setup();
+  const tiledSummary: ViewerManifestSummary = { ...summary, scene: { package_id: 'test', catalog_url: '/scene/catalog', files: [{ file_id: 1, path: 'terrain.tif', kind: 'COG', url: '/scene/1', sha256: 'a'.repeat(64), size_bytes: 2048, media_type: 'image/tiff' }] }, frame: { origin_wgs84: [5.37, 44.75, 454.2], local_frame: 'ENU', meters_per_unit: 0.01, vertical_datum: 'EPSG:4979' }, modelState: 'available' };
+  const spatialView: PublicIncidentView = {
+    ...view,
+    daily_intelligence: [],
+    active_fire_zones: [{ zone_revision_id: 'active-16', zone_kind: 'active', revision: 1, valid_at: '2026-07-15T22:15:00Z', analysis_id: 'analysis-16', geometry_geojson: { type: 'Polygon', coordinates: [[[6.1, 43.2], [6.11, 43.2], [6.11, 43.21], [6.1, 43.2]]] } }],
+    burned_area_zones: [{ zone_revision_id: 'burned-16', zone_kind: 'burned', revision: 1, valid_at: '2026-07-15T22:15:00Z', analysis_id: 'analysis-16', geometry_geojson: { type: 'Polygon', coordinates: [[[6.09, 43.19], [6.12, 43.19], [6.12, 43.22], [6.09, 43.19]]] } }],
+  };
+
+  render(<PublicIncidentRealPage summary={tiledSummary} checkedAt="2026-07-15T10:00:00Z" stale={false} refreshing={false} onRefresh={vi.fn()} detailRequest={Promise.resolve({ view: spatialView, error: null })} />);
+  await screen.findByRole('heading', { name: 'Progression observée' });
+  await user.click(screen.getByRole('button', { name: 'Ouvrir la carte' }));
+  const scene = await screen.findByTestId('tiled-scene-preset');
+
+  expect(scene).toHaveAttribute('data-polygon-layers', '#ffca3a:6:26');
+  expect(screen.queryByRole('button', { name: /Zone active/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /Zone parcourue/ })).not.toBeInTheDocument();
+});
+
+it('écarte aussi les périmètres v1 d’un autre jour', async () => {
+  vi.stubEnv('VITE_FV_EVENT_V2_ENABLED', 'true');
+  vi.stubEnv('VITE_FV_V2_PUBLICATION_ENABLED', 'true');
+  vi.stubEnv('VITE_FV_3D_PRIMARY_ENABLED', 'true');
+  vi.stubGlobal('WebGLRenderingContext', class WebGLRenderingContext {});
+  vi.spyOn(HTMLCanvasElement.prototype, 'getContext').mockImplementation(() => ({} as never));
+  vi.mocked(loadPublicIncidentEventTimeline).mockResolvedValue(eventTimeline);
+  const user = userEvent.setup();
+  const tiledSummary: ViewerManifestSummary = { ...summary, scene: { package_id: 'test', catalog_url: '/scene/catalog', files: [{ file_id: 1, path: 'terrain.tif', kind: 'COG', url: '/scene/1', sha256: 'a'.repeat(64), size_bytes: 2048, media_type: 'image/tiff' }] }, frame: { origin_wgs84: [5.37, 44.75, 454.2], local_frame: 'ENU', meters_per_unit: 0.01, vertical_datum: 'EPSG:4979' }, modelState: 'available' };
+  const previousDayView: PublicIncidentView = {
+    ...view,
+    daily_intelligence: [spatialDay('2026-07-14', 'analysis-14')],
+    active_fire_zones: [{ zone_revision_id: 'active-14', zone_kind: 'active', revision: 1, valid_at: '2026-07-14T12:00:00Z', analysis_id: 'analysis-14', geometry_geojson: { type: 'Polygon', coordinates: [[[6.1, 43.2], [6.11, 43.2], [6.11, 43.21], [6.1, 43.2]]] } }],
+    burned_area_zones: [{ zone_revision_id: 'burned-14', zone_kind: 'burned', revision: 1, valid_at: '2026-07-14T12:00:00Z', analysis_id: 'analysis-14', geometry_geojson: { type: 'Polygon', coordinates: [[[6.09, 43.19], [6.12, 43.19], [6.12, 43.22], [6.09, 43.19]]] } }],
+  };
+
+  render(<PublicIncidentRealPage summary={tiledSummary} checkedAt="2026-07-15T10:00:00Z" stale={false} refreshing={false} onRefresh={vi.fn()} detailRequest={Promise.resolve({ view: previousDayView, error: null })} />);
+  await screen.findByRole('heading', { name: 'Progression observée' });
+  await user.click(screen.getByRole('button', { name: 'Ouvrir la carte' }));
+  const scene = await screen.findByTestId('tiled-scene-preset');
+
+  expect(scene).toHaveAttribute('data-polygon-layers', '#ffca3a:6:26');
+  expect(screen.getByText(/événements de la révision publique 2/i)).toBeVisible();
+  expect(screen.queryByRole('button', { name: /Zone active/ })).not.toBeInTheDocument();
+  expect(screen.queryByRole('button', { name: /Zone parcourue/ })).not.toBeInTheDocument();
 });

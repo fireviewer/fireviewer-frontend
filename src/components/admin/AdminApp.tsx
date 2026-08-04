@@ -2,6 +2,7 @@ import type { AdminRoute } from '../../routing';
 import { AdminApiProvider } from './AdminApiContext';
 import { AdminAuthGate } from './AdminAuthGate';
 import { AdminDashboardPage, AdminOperationalMapPage } from './AdminCommandPages';
+import { AdminEventReviewPage } from './AdminEventReviewPage';
 import { AdminAuditPage, AdminConfigurationPage, AdminRolesPage, AdminSystemPage } from './AdminGovernancePages';
 import { AdminIncidentDetailPage } from './AdminIncidentDetailPage';
 import { AdminIncidentGalleryPage } from './AdminIncidentGalleryPage';
@@ -52,6 +53,7 @@ export default function AdminApp({ route }: AdminAppProps) {
   else if (route.kind === 'zone-private-preview') page = <AdminZonePrivatePreviewPage zoneId={route.zoneId} revision={Number(route.revision)} />;
   else if (route.kind === 'reports') page = <AdminReportsPage />;
   else if (route.kind === 'work-queue') page = <AdminWorkQueuePage />;
+  else if (route.kind === 'event-review') page = <AdminEventReviewPage candidateId={route.candidateId} />;
   else if (route.kind === 'spatial-matching') page = <AdminSpatialMatchingPage />;
   else if (route.kind === 'incidents') page = <AdminIncidentsPage />;
   else if (route.kind === 'new-incident') page = <AdminNewIncidentPage />;

@@ -11,8 +11,13 @@ describe('resolveAppRoute', () => {
     expect(resolveAppRoute('/incendie/FR-83-00042/ajouter-preuve')).toEqual({ kind: 'public-add-evidence', fireId: 'FR-83-00042' });
     expect(resolveAppRoute('/incendie/FR-83-00042/signaler-erreur')).toEqual({ kind: 'public-incident-report', fireId: 'FR-83-00042' });
     expect(resolveAppRoute('/contribution/local-123')).toEqual({ kind: 'public-contribution', contributionId: 'local-123' });
-    expect(resolveAppRoute('/signaler')).toEqual({ kind: 'public-page', section: 'incidents' });
+    expect(resolveAppRoute('/signaler')).toEqual({ kind: 'public-event-contribution' });
+    expect(resolveAppRoute('/contribuer')).toEqual({ kind: 'public-event-contribution' });
+    expect(resolveAppRoute('/mes-contributions')).toEqual({ kind: 'public-my-event-candidates' });
+    expect(resolveAppRoute('/mes-contributions/candidate-1')).toEqual({ kind: 'public-my-event-candidates', candidateId: 'candidate-1' });
     expect(resolveAppRoute('/compte')).toEqual({ kind: 'public-page', section: 'account' });
+    expect(resolveAppRoute('/compte/recuperation')).toEqual({ kind: 'public-account-recovery' });
+    expect(resolveAppRoute('/compte/nouveau-mot-de-passe')).toEqual({ kind: 'public-password-update' });
     expect(resolveAppRoute('/reglages')).toEqual({ kind: 'public-page', section: 'settings' });
     expect(resolveAppRoute('/fonctionnement')).toEqual({ kind: 'public-page', section: 'operation' });
     expect(resolveAppRoute('/confidentialite')).toEqual({ kind: 'public-page', section: 'privacy' });
@@ -38,6 +43,8 @@ describe('resolveAppRoute', () => {
     expect(resolveAdminRoute('/admin')).toEqual({ kind: 'dashboard' });
     expect(resolveAdminRoute('/admin/carte-operationnelle')).toEqual({ kind: 'operational-map' });
     expect(resolveAdminRoute('/admin/validation')).toEqual({ kind: 'work-queue' });
+    expect(resolveAdminRoute('/admin/revue-evenements')).toEqual({ kind: 'event-review' });
+    expect(resolveAdminRoute('/admin/revue-evenements/EC-private-1')).toEqual({ kind: 'event-review', candidateId: 'EC-private-1' });
     expect(resolveAdminRoute('/admin/file-de-traitement')).toEqual({ kind: 'work-queue' });
     expect(resolveAdminRoute('/admin/rapprochement-spatial')).toEqual({ kind: 'spatial-matching' });
     expect(resolveAdminRoute('/admin/incidents/nouveau')).toEqual({ kind: 'new-incident' });

@@ -11,6 +11,7 @@ export type AdminRoute =
   | { kind: 'zone-private-preview'; zoneId: string; revision: string }
   | { kind: 'reports' }
   | { kind: 'work-queue' }
+  | { kind: 'event-review'; candidateId?: string }
   | { kind: 'spatial-matching' }
   | { kind: 'incidents' }
   | { kind: 'new-incident' }
@@ -34,6 +35,10 @@ export type AppRoute =
   | { kind: 'public-zone-retired' }
   | { kind: 'home' }
   | { kind: 'public-page'; section: 'incidents' | 'account' | 'settings' | 'operation' | 'privacy' | 'accessibility' | 'legal' | 'about' }
+  | { kind: 'public-account-recovery' }
+  | { kind: 'public-password-update' }
+  | { kind: 'public-event-contribution' }
+  | { kind: 'public-my-event-candidates'; candidateId?: string }
   | { kind: 'public-add-evidence'; fireId: string }
   | { kind: 'public-incident-report'; fireId: string }
   | { kind: 'public-contribution'; contributionId: string }
@@ -59,6 +64,7 @@ export function resolveAdminRoute(pathname: string): AdminRoute {
   if (normalizedPath === '/admin/carte-operationnelle') return { kind: 'operational-map' };
   if (normalizedPath === '/admin/signalements') return { kind: 'reports' };
   if (normalizedPath === '/admin/validation' || normalizedPath === '/admin/file-de-traitement') return { kind: 'work-queue' };
+  if (normalizedPath === '/admin/revue-evenements') return { kind: 'event-review' };
   if (normalizedPath === '/admin/rapprochement-spatial') return { kind: 'spatial-matching' };
   if (normalizedPath === '/admin/audit') return { kind: 'audit' };
   if (normalizedPath === '/admin/roles') return { kind: 'roles' };
@@ -68,6 +74,9 @@ export function resolveAdminRoute(pathname: string): AdminRoute {
   if (normalizedPath === '/admin/incidents') return { kind: 'incidents' };
   if (normalizedPath === '/admin/incidents/nouveau') return { kind: 'new-incident' };
   const segments = trimSlashes(normalizedPath);
+  if (segments.length === 3 && segments[0] === 'admin' && segments[1] === 'revue-evenements') {
+    return { kind: 'event-review', candidateId: segments[2] };
+  }
   if (segments.length === 4 && segments[0] === 'admin' && segments[1] === 'incidents' && /^FR-[0-9A-Z]{2,3}-[0-9]{5}$/.test(segments[2])) {
     if (segments[3] === 'observations') return { kind: 'incident-observations', fireId: segments[2] };
     if (segments[3] === 'sources-medias') return { kind: 'incident-sources-media', fireId: segments[2] };
@@ -153,7 +162,9 @@ export function resolveAppRoute(pathname = window.location.pathname): AppRoute {
   if (pathname === '/' || pathname === '') return { kind: 'home' };
   const normalizedPath = pathname.replace(/\/+$/, '') || '/';
   if (normalizedPath === '/incendies' || normalizedPath === '/incidents') return { kind: 'public-page', section: 'incidents' };
-  if (normalizedPath === '/signaler') return { kind: 'public-page', section: 'incidents' };
+  if (normalizedPath === '/signaler' || normalizedPath === '/contribuer') return { kind: 'public-event-contribution' };
+  if (normalizedPath === '/compte/recuperation') return { kind: 'public-account-recovery' };
+  if (normalizedPath === '/compte/nouveau-mot-de-passe') return { kind: 'public-password-update' };
   if (/^\/compte(?:\/|$)/.test(normalizedPath)) return { kind: 'public-page', section: 'account' };
   if (normalizedPath === '/reglages') return { kind: 'public-page', section: 'settings' };
   if (normalizedPath === '/fonctionnement' || normalizedPath === '/documentation' || normalizedPath === '/limites') return { kind: 'public-page', section: 'operation' };
@@ -162,6 +173,8 @@ export function resolveAppRoute(pathname = window.location.pathname): AppRoute {
   if (normalizedPath === '/mentions-legales') return { kind: 'public-page', section: 'legal' };
   if (normalizedPath === '/a-propos' || normalizedPath === '/statut') return { kind: 'public-page', section: 'about' };
   const incidentSegments = trimSlashes(pathname);
+  if (incidentSegments.length === 1 && incidentSegments[0] === 'mes-contributions') return { kind: 'public-my-event-candidates' };
+  if (incidentSegments.length === 2 && incidentSegments[0] === 'mes-contributions') return { kind: 'public-my-event-candidates', candidateId: incidentSegments[1] };
   if (incidentSegments.length === 3 && (incidentSegments[0] === 'incendie' || incidentSegments[0] === 'incident') && incidentSegments[2] === 'ajouter-preuve') {
     return { kind: 'public-add-evidence', fireId: incidentSegments[1].toUpperCase() };
   }
