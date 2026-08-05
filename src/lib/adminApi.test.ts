@@ -364,6 +364,33 @@ describe('client API d’administration', () => {
     expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({ expected_analysis_window_id: 'window-20260712' });
   });
 
+  it('rattache les périmètres par un endpoint séparé sans remplacer la carte', async () => {
+    vi.stubEnv('VITE_API_BASE_URL', API_ORIGIN);
+    const objects = [
+      { path: 'manifest.json', pathname: `packages/${'b'.repeat(32)}/manifest.json`, size_bytes: 100, content_type: 'application/json' },
+      { path: 'dependency-inventory.json', pathname: `packages/${'b'.repeat(32)}/dependency-inventory.json`, size_bytes: 156, content_type: 'application/json' },
+      { path: 'perimeters.usda', pathname: `packages/${'b'.repeat(32)}/perimeters.usda`, size_bytes: 200, content_type: 'model/vnd.usd' },
+    ];
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(response({
+      fire_id: 'FR-99-00001', package_id: 'perimeters-r1', package_state: 'VERIFIED',
+      base_map_package_id: 'map-r5', zone_id: 'SYNTHETIC-ZONE-01', revision: 5,
+      incident_version: 8, object_count: 3, total_size_bytes: 456, asset_count: 1,
+      state_count: 21, trace_id: 'trace-project-perimeters',
+    }, 201));
+    const client = new AdminApiClient({ session: SESSION, fetchImpl: fetchMock });
+
+    await expect(client.finalizeIncidentPerimeterPackageFromBlob('FR-99-00001', {
+      upload_id: 'b'.repeat(32), package_id: 'perimeters-r1', zone_id: 'SYNTHETIC-ZONE-01', revision: 5,
+      expected_incident_version: 8, primary_profile: 'local',
+      reason: 'Rattachement séparé du package de périmètres temporels.', objects,
+    }, { idempotencyKey: 'project-perimeters-finalize-0001' })).resolves.toMatchObject({
+      package_state: 'VERIFIED', base_map_package_id: 'map-r5', state_count: 21,
+    });
+
+    const [url] = fetchMock.mock.calls[0] ?? [];
+    expect(url).toBe(`${API_ORIGIN}/api/v2/admin/incidents/FR-99-00001/perimeter-package/from-blob`);
+  });
+
   it('ouvre puis finalise un lot satellite lié uniquement à la fenêtre active', async () => {
     vi.stubEnv('VITE_API_BASE_URL', API_ORIGIN);
     const opened = {

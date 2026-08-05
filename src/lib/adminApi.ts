@@ -490,6 +490,21 @@ export interface AdminBlobUploadGrant {
   readonly allowed_content_types: readonly string[];
 }
 
+export interface AdminIncidentPerimeterPackageImport {
+  readonly fire_id: string;
+  readonly package_id: string;
+  readonly package_state: 'VERIFIED';
+  readonly base_map_package_id: string;
+  readonly zone_id: string;
+  readonly revision: number;
+  readonly incident_version: number;
+  readonly object_count: number;
+  readonly total_size_bytes: number;
+  readonly asset_count: number;
+  readonly state_count: number;
+  readonly trace_id: string;
+}
+
 export interface AdminDailySatellitePackageOpen extends AdminBlobUploadGrant {
   readonly package_id: string;
   readonly already_uploaded_filenames: readonly string[];
@@ -939,6 +954,26 @@ function parseIncidentSourcesMediaWorkspace(value: unknown): AdminIncidentSource
         external_reference: readString(item.external_reference, 'external_reference', { nullable: true, max: 512 }),
       };
     }),
+  };
+}
+
+function parseIncidentPerimeterPackageImport(value: unknown): AdminIncidentPerimeterPackageImport {
+  if (!isRecord(value) || !hasExactKeys(value, ['fire_id', 'package_id', 'package_state', 'base_map_package_id', 'zone_id', 'revision', 'incident_version', 'object_count', 'total_size_bytes', 'asset_count', 'state_count', 'trace_id'])) {
+    throw new Error('Import du package de périmètres invalide.');
+  }
+  return {
+    fire_id: readString(value.fire_id, 'fire_id', { max: 32 })!,
+    package_id: readString(value.package_id, 'package_id', { max: 96 })!,
+    package_state: readEnum(value.package_state, 'package_state', ['VERIFIED']),
+    base_map_package_id: readString(value.base_map_package_id, 'base_map_package_id', { max: 96 })!,
+    zone_id: readString(value.zone_id, 'zone_id', { max: 64 })!,
+    revision: readPositiveInteger(value.revision, 'revision'),
+    incident_version: readPositiveInteger(value.incident_version, 'incident_version'),
+    object_count: readPositiveInteger(value.object_count, 'object_count'),
+    total_size_bytes: readPositiveInteger(value.total_size_bytes, 'total_size_bytes'),
+    asset_count: readPositiveInteger(value.asset_count, 'asset_count'),
+    state_count: readPositiveInteger(value.state_count, 'state_count'),
+    trace_id: parseTraceId(value.trace_id),
   };
 }
 
@@ -2216,6 +2251,32 @@ export class AdminApiClient {
     const payload = await this.request(`/incidents/${encodeURIComponent(fireId)}`, { method: 'GET' }, options);
     try { return parseIncidentDetail(payload); }
     catch { throw new AdminApiError('parse', 'Le détail de l’incident est invalide.'); }
+  }
+
+  async finalizeIncidentPerimeterPackageFromBlob(
+    fireId: string,
+    input: {
+      readonly upload_id: string;
+      readonly package_id: string;
+      readonly zone_id: string;
+      readonly revision: number;
+      readonly expected_incident_version: number;
+      readonly primary_profile: 'local';
+      readonly reason: string;
+      readonly objects: readonly AdminBlobObjectReference[];
+    },
+    options: AdminRequestOptions,
+  ): Promise<AdminIncidentPerimeterPackageImport> {
+    if (!/^FR-[0-9A-Z]{2,3}-[0-9]{5}$/.test(fireId) || !/^[a-f0-9]{32}$/.test(input.upload_id) || input.package_id.trim().length < 3 || !/^[A-Z][A-Z0-9-]{2,63}$/.test(input.zone_id) || !Number.isSafeInteger(input.revision) || input.revision < 1 || !Number.isSafeInteger(input.expected_incident_version) || input.expected_incident_version < 1 || input.reason.trim().length < 10 || input.objects.length < 3) {
+      throw new AdminApiError('configuration', 'La finalisation du package de périmètres est invalide.');
+    }
+    const payload = await this.postJsonV2(
+      `/incidents/${encodeURIComponent(fireId)}/perimeter-package/from-blob`,
+      input,
+      options,
+    );
+    try { return parseIncidentPerimeterPackageImport(payload); }
+    catch { throw new AdminApiError('parse', 'La réponse de finalisation des périmètres est invalide.'); }
   }
 
   async getIncidentPublicationStatus(fireId: string, options: AdminRequestOptions = {}): Promise<AdminIncidentPublicationStatus> {

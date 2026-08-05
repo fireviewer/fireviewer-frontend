@@ -8,6 +8,7 @@ import {
   FireWarningReportPage,
 } from './components/public/FireWarningContributionPages';
 import { PublicIncidentRealPage } from './components/public/PublicIncidentRealPage';
+import { PublicResourcesPage } from './components/public/PublicResourcesPage';
 import {
   AccessibilityPage,
   AccountPage,
@@ -323,7 +324,8 @@ function PublicZoneRetiredScreen() {
 
 function PublicPage({ section }: { readonly section: Extract<ReturnType<typeof resolveAppRoute>, { kind: 'public-page' }>['section'] }) {
   const content = section === 'incidents' ? <FireWarningIncidentsPage />
-    : section === 'account' ? (isFeatureEnabled('FV_SUPABASE_AUTH_ENABLED') ? <SupabaseAccountPage /> : <AccountPage />)
+    : section === 'resources' ? <PublicResourcesPage />
+      : section === 'account' ? (isFeatureEnabled('FV_SUPABASE_AUTH_ENABLED') ? <SupabaseAccountPage /> : <AccountPage />)
         : section === 'settings' ? <SettingsPage />
           : section === 'operation' ? <OperationPage />
             : section === 'privacy' ? <PrivacyPage />

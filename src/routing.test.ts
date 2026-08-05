@@ -7,6 +7,8 @@ describe('resolveAppRoute', () => {
     expect(resolveAppRoute('/demo')).toEqual({ kind: 'public-demo', fireId: 'FR-SIM-00001' });
     expect(resolveAppRoute('/demo/simulation')).toEqual({ kind: 'public-demo', fireId: 'FR-SIM-00001' });
     expect(resolveAppRoute('/incendies')).toEqual({ kind: 'public-page', section: 'incidents' });
+    expect(resolveAppRoute('/ressources')).toEqual({ kind: 'public-page', section: 'resources' });
+    expect(resolveAppRoute('/resources')).toEqual({ kind: 'public-page', section: 'resources' });
     expect(resolveAppRoute('/incendie/FR-83-00042')).toEqual({ kind: 'public-incident', fireId: 'FR-83-00042' });
     expect(resolveAppRoute('/incendie/FR-83-00042/ajouter-preuve')).toEqual({ kind: 'public-add-evidence', fireId: 'FR-83-00042' });
     expect(resolveAppRoute('/incendie/FR-83-00042/signaler-erreur')).toEqual({ kind: 'public-incident-report', fireId: 'FR-83-00042' });

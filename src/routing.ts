@@ -34,7 +34,7 @@ export type AppRoute =
   | { kind: 'public-demo'; fireId: 'FR-SIM-00001' }
   | { kind: 'public-zone-retired' }
   | { kind: 'home' }
-  | { kind: 'public-page'; section: 'incidents' | 'account' | 'settings' | 'operation' | 'privacy' | 'accessibility' | 'legal' | 'about' }
+  | { kind: 'public-page'; section: 'incidents' | 'resources' | 'account' | 'settings' | 'operation' | 'privacy' | 'accessibility' | 'legal' | 'about' }
   | { kind: 'public-account-recovery' }
   | { kind: 'public-password-update' }
   | { kind: 'public-event-contribution' }
@@ -162,6 +162,7 @@ export function resolveAppRoute(pathname = window.location.pathname): AppRoute {
   if (pathname === '/' || pathname === '') return { kind: 'home' };
   const normalizedPath = pathname.replace(/\/+$/, '') || '/';
   if (normalizedPath === '/incendies' || normalizedPath === '/incidents') return { kind: 'public-page', section: 'incidents' };
+  if (normalizedPath === '/ressources' || normalizedPath === '/resources') return { kind: 'public-page', section: 'resources' };
   if (normalizedPath === '/signaler' || normalizedPath === '/contribuer') return { kind: 'public-event-contribution' };
   if (normalizedPath === '/compte/recuperation') return { kind: 'public-account-recovery' };
   if (normalizedPath === '/compte/nouveau-mot-de-passe') return { kind: 'public-password-update' };

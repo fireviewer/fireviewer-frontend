@@ -3,7 +3,7 @@ import { PublicIcon } from './PublicIcon';
 import './firewarning-public.css';
 
 export type PublicSection =
-  | 'home' | 'incidents' | 'report' | 'account' | 'settings' | 'operation'
+  | 'home' | 'incidents' | 'resources' | 'report' | 'account' | 'settings' | 'operation'
   | 'privacy' | 'accessibility' | 'legal' | 'about' | 'incident';
 
 interface PublicSiteShellProps {
@@ -48,6 +48,7 @@ function PublicHeader({ section }: { readonly section: PublicSection }) {
   const links = (
     <>
       <a href="/incendies" aria-current={section === 'incidents' ? 'page' : undefined}>Incendies</a>
+      <a href="/ressources" aria-current={section === 'resources' ? 'page' : undefined}>Ressources</a>
       <a href="/fonctionnement" aria-current={section === 'operation' ? 'page' : undefined}>Comprendre</a>
     </>
   );
@@ -56,6 +57,7 @@ function PublicHeader({ section }: { readonly section: PublicSection }) {
     <>
       <a href="/" aria-current={section === 'home' ? 'page' : undefined}>Accueil <PublicIcon name="chevron-right" size={16} /></a>
       <a href="/incendies" aria-current={section === 'incidents' ? 'page' : undefined}>Incendies <PublicIcon name="chevron-right" size={16} /></a>
+      <a href="/ressources" aria-current={section === 'resources' ? 'page' : undefined}>Ressources <PublicIcon name="chevron-right" size={16} /></a>
       <a href="/fonctionnement" aria-current={section === 'operation' ? 'page' : undefined}>Comprendre <PublicIcon name="chevron-right" size={16} /></a>
       <a href="/compte" aria-current={section === 'account' ? 'page' : undefined}>Compte <PublicIcon name="chevron-right" size={16} /></a>
       <a href="/reglages" aria-current={section === 'settings' ? 'page' : undefined}>Réglages <PublicIcon name="chevron-right" size={16} /></a>
@@ -103,6 +105,7 @@ function PublicFooter() {
         <nav className="fw-footer__links" aria-label="Liens de pied de page">
           <a href="/a-propos">À propos</a>
           <a href="/fonctionnement">Comment ça fonctionne&nbsp;?</a>
+          <a href="/ressources">Ressources</a>
           <a href="/confidentialite">Confidentialité</a>
           <a href="/mentions-legales">Mentions légales</a>
           <a href="/accessibilite">Accessibilité</a>

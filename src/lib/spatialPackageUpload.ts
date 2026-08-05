@@ -3,6 +3,7 @@ import type {
   AdminApiClient,
   AdminBlobObjectReference,
   AdminBlobUploadGrant,
+  AdminIncidentPerimeterPackageImport,
   AdminIncidentSpatialPackageImport,
   AdminSpatialPackageImport,
 } from './adminApi';
@@ -27,6 +28,13 @@ const CONTENT_TYPES: Readonly<Record<string, string>> = {
   '.glb': 'model/gltf-binary',
   '.fwtile': 'application/vnd.fireviewer.tile',
   '.fwterrain': 'application/vnd.fireviewer.terrain',
+  '.usd': 'model/vnd.usd',
+  '.usda': 'model/vnd.usd',
+  '.usdc': 'model/vnd.usd',
+  '.usdz': 'model/vnd.usdz+zip',
+  '.hdr': 'image/vnd.radiance',
+  '.npz': 'application/octet-stream',
+  '.jgw': 'text/plain',
 };
 
 interface CatalogAsset {
@@ -42,12 +50,15 @@ export interface PreparedPackageFile {
 }
 
 export interface PreparedSpatialPackage {
+  readonly role: 'legacy_map' | 'omniverse_map' | 'omniverse_perimeter';
   readonly packageId: string;
   readonly zoneId: string;
   readonly revision: number;
   readonly files: readonly PreparedPackageFile[];
   readonly totalSizeBytes: number;
   readonly assetCount: number;
+  readonly baseMapPackageId?: string;
+  readonly stateCount?: number;
 }
 
 export interface SpatialPackageUploadProgress {
@@ -202,7 +213,7 @@ function mapSelectedFiles(files: readonly File[], expectedPaths: readonly string
   return mapped;
 }
 
-export async function prepareSpatialPackage(
+async function prepareLegacySpatialPackage(
   selectedFiles: FileList | readonly File[],
   expectedZoneId?: string,
   expectedRevision?: number,
@@ -275,6 +286,7 @@ export async function prepareSpatialPackage(
     contentType: contentType(path),
   }));
   return {
+    role: 'legacy_map',
     packageId,
     zoneId: target.zoneId,
     revision: target.revision,
@@ -282,6 +294,194 @@ export async function prepareSpatialPackage(
     totalSizeBytes: preparedFiles.reduce((total, item) => total + item.file.size, 0),
     assetCount: assets.length,
   };
+}
+
+interface OmniverseInventoryEntry {
+  readonly path: string;
+  readonly sha256: string;
+  readonly sizeBytes: number;
+}
+
+function selectedRootFiles(files: readonly File[]): Map<string, File> {
+  const selected = files.map((file) => ({ file, path: selectedPath(file) }));
+  const root = commonRoot(selected.map((item) => item.path));
+  return new Map(selected.map((item) => [root ? item.path.slice(root.length + 1) : item.path, item.file]));
+}
+
+function omniverseInventory(document: Record<string, unknown>): readonly OmniverseInventoryEntry[] {
+  if (!Array.isArray(document.files) || document.files.length === 0 || document.file_count !== document.files.length) {
+    throw new Error('dependency-inventory.json ne décrit pas un inventaire complet.');
+  }
+  const entries = document.files.map((value) => {
+    const item = asRecord(value, 'Entrée de dependency-inventory.json');
+    const path = safePath(typeof item.path === 'string' ? item.path : '');
+    contentType(path);
+    return {
+      path,
+      sha256: digest(item.sha256, `Empreinte de ${path}`),
+      sizeBytes: positiveInteger(item.byte_count, `Taille de ${path}`),
+    };
+  });
+  if (new Set(entries.map((item) => item.path)).size !== entries.length) {
+    throw new Error('dependency-inventory.json déclare un chemin plusieurs fois.');
+  }
+  return entries;
+}
+
+async function prepareOmniverseSpatialPackage(
+  files: readonly File[],
+  expectedZoneId?: string,
+  expectedRevision?: number,
+): Promise<PreparedSpatialPackage> {
+  const roots = selectedRootFiles(files);
+  const manifestFile = roots.get('manifest.json');
+  const inventoryFile = roots.get('dependency-inventory.json');
+  const mapContractFile = roots.get('contracts/map-contract.json');
+  const perimeterContractFile = roots.get('contracts/perimeter-contract.json');
+  if (!manifestFile || !inventoryFile || Number(Boolean(mapContractFile)) + Number(Boolean(perimeterContractFile)) !== 1) {
+    throw new Error('Le package OpenUSD doit contenir son manifeste, son inventaire et un seul contrat de rôle.');
+  }
+  const contractFile = mapContractFile ?? perimeterContractFile!;
+  const contractPath = mapContractFile ? 'contracts/map-contract.json' : 'contracts/perimeter-contract.json';
+  const role = mapContractFile ? 'omniverse_map' as const : 'omniverse_perimeter' as const;
+  const [manifest, inventory, contract] = await Promise.all([
+    readJson(manifestFile, 'manifest.json'),
+    readJson(inventoryFile, 'dependency-inventory.json'),
+    readJson(contractFile, contractPath),
+  ]);
+  const inventoryReference = asRecord(manifest.dependency_inventory, 'Référence de dependency-inventory.json');
+  if (
+    inventoryReference.path !== 'dependency-inventory.json'
+    || digest(inventoryReference.sha256, 'Empreinte de dependency-inventory.json') !== await sha256Hex(inventoryFile)
+  ) {
+    throw new Error('dependency-inventory.json ne correspond pas au manifeste.');
+  }
+  const entries = omniverseInventory(inventory);
+  if (inventoryReference.file_count !== entries.length) {
+    throw new Error('Le nombre de dépendances diffère entre le manifeste et l’inventaire.');
+  }
+  const expectedPaths = ['manifest.json', 'dependency-inventory.json', contractPath, ...entries.map((item) => item.path)];
+  const mapped = mapSelectedFiles(files, expectedPaths);
+  const missing = expectedPaths.filter((path) => !mapped.has(path));
+  if (missing.length) throw new Error(`Fichier déclaré absent : ${missing[0]}`);
+  for (const entry of entries) {
+    if (mapped.get(entry.path)!.size !== entry.sizeBytes) {
+      throw new Error(`La taille de ${entry.path} diffère de dependency-inventory.json.`);
+    }
+  }
+  if (contract.contract_status !== 'active' || manifest.status !== 'active') {
+    throw new Error('Seul un contrat OpenUSD actif peut être importé.');
+  }
+
+  let packageId: string;
+  let zoneId: string;
+  let revision: number;
+  let baseMapPackageId: string | undefined;
+  let stateCount: number | undefined;
+  let entryPath: string;
+  let entrySha256: string;
+  const manifestHash = await sha256Hex(manifestFile);
+
+  if (role === 'omniverse_map') {
+    if (contract.schema !== 'fireviewer.omniverse-map-upload-contract.v1' || manifest.schema !== 'fireviewer.omniverse-pure-map-package.v1') {
+      throw new Error('Le contrat de carte Omniverse est incompatible.');
+    }
+    const packageRecord = asRecord(contract.package, 'Contrat de package carte');
+    const release = asRecord(contract.release, 'Décision de publication carte');
+    packageId = typeof packageRecord.package_id === 'string' ? packageRecord.package_id : '';
+    revision = positiveInteger(packageRecord.revision, 'Révision de carte');
+    entryPath = typeof packageRecord.entry_stage === 'string' ? safePath(packageRecord.entry_stage) : '';
+    entrySha256 = digest(packageRecord.entry_stage_sha256, 'Empreinte de map.usda');
+    if (
+      release.upload_allowed !== true
+      || release.automatic_publication !== false
+      || packageRecord.manifest_sha256 !== manifestHash
+      || manifest.package_id !== packageId
+      || manifest.revision !== revision
+      || manifest.entry_stage !== packageRecord.entry_stage
+      || manifest.entry_stage_sha256 !== packageRecord.entry_stage_sha256
+    ) {
+      throw new Error('Le manifeste et le contrat de carte Omniverse ne correspondent pas.');
+    }
+    const sourceManifestFile = mapped.get('source-usd/source/package-manifest.json');
+    if (!sourceManifestFile) throw new Error('Le manifeste de la carte source est absent.');
+    const sourceManifest = await readJson(sourceManifestFile, 'source-usd/source/package-manifest.json');
+    if (!Array.isArray(sourceManifest.zones) || sourceManifest.zones.length !== 1) {
+      throw new Error('Le package doit déclarer exactement une zone source.');
+    }
+    const sourceZone = asRecord(sourceManifest.zones[0], 'Zone source');
+    if (typeof sourceZone.zone_id !== 'string' || !/^[A-Z][A-Z0-9-]{2,63}$/.test(sourceZone.zone_id)) {
+      throw new Error('La zone source du package est invalide.');
+    }
+    zoneId = sourceZone.zone_id;
+    if (expectedZoneId !== undefined && (zoneId !== expectedZoneId || revision !== expectedRevision)) {
+      throw new Error('La carte Omniverse ne cible pas cette zone et cette révision.');
+    }
+  } else {
+    if (contract.schema !== 'fireviewer.omniverse-progressive-perimeter-layer-contract.v1' || manifest.schema !== 'fireviewer.omniverse-progressive-perimeter-package.v1') {
+      throw new Error('Le contrat de périmètres Omniverse est incompatible.');
+    }
+    if (expectedZoneId === undefined || expectedRevision === undefined) {
+      throw new Error('Le package de périmètres doit être sélectionné depuis un projet possédant sa carte Omniverse.');
+    }
+    const packageRecord = asRecord(contract.layer_package, 'Contrat du calque de périmètres');
+    const release = asRecord(contract.release, 'Décision de rattachement des périmètres');
+    const baseMap = asRecord(contract.base_map, 'Carte de rattachement');
+    const progression = asRecord(contract.progression, 'Progression des périmètres');
+    packageId = typeof packageRecord.layer_package_id === 'string' ? packageRecord.layer_package_id : '';
+    entryPath = typeof packageRecord.entry_layer === 'string' ? safePath(packageRecord.entry_layer) : '';
+    entrySha256 = digest(packageRecord.entry_layer_sha256, 'Empreinte du calque USD');
+    zoneId = expectedZoneId;
+    revision = expectedRevision;
+    baseMapPackageId = typeof baseMap.package_id === 'string' ? baseMap.package_id : undefined;
+    stateCount = positiveInteger(progression.state_count, 'Nombre d’états temporels');
+    if (
+      release.layer_attachment_allowed !== true
+      || release.automatic_publication !== false
+      || packageRecord.manifest_sha256 !== manifestHash
+      || manifest.layer_package_id !== packageId
+      || manifest.entry_layer !== packageRecord.entry_layer
+      || manifest.entry_layer_sha256 !== packageRecord.entry_layer_sha256
+      || baseMap.revision !== revision
+      || progression.layer_crs !== 'EPSG:2154'
+    ) {
+      throw new Error('Le manifeste de périmètres ne correspond pas à la carte active.');
+    }
+  }
+  if (!PACKAGE_ID_RE.test(packageId)) throw new Error('Le package OpenUSD contient un identifiant invalide.');
+  const entry = entries.find((item) => item.path === entryPath);
+  if (!entry || entry.sha256 !== entrySha256) {
+    throw new Error('Le stage OpenUSD principal ne correspond pas à l’inventaire.');
+  }
+  const preparedFiles = expectedPaths.map((path) => ({
+    path,
+    file: mapped.get(path)!,
+    contentType: contentType(path),
+  }));
+  return {
+    role,
+    packageId,
+    zoneId,
+    revision,
+    files: preparedFiles,
+    totalSizeBytes: preparedFiles.reduce((total, item) => total + item.file.size, 0),
+    assetCount: entries.length,
+    baseMapPackageId,
+    stateCount,
+  };
+}
+
+export async function prepareSpatialPackage(
+  selectedFiles: FileList | readonly File[],
+  expectedZoneId?: string,
+  expectedRevision?: number,
+): Promise<PreparedSpatialPackage> {
+  const files = Array.from(selectedFiles);
+  const roots = selectedRootFiles(files);
+  if (roots.has('manifest.json') || roots.has('dependency-inventory.json')) {
+    return prepareOmniverseSpatialPackage(files, expectedZoneId, expectedRevision);
+  }
+  return prepareLegacySpatialPackage(files, expectedZoneId, expectedRevision);
 }
 
 function defaultUploader(pathname: string, file: File, options: BlobUploadOptions) {
@@ -329,7 +529,7 @@ export async function uploadPreparedSpatialPackage(
       readonly expectedIncidentVersion: number;
     };
   } = {},
-): Promise<AdminSpatialPackageImport | AdminIncidentSpatialPackageImport> {
+): Promise<AdminSpatialPackageImport | AdminIncidentSpatialPackageImport | AdminIncidentPerimeterPackageImport> {
   const grantInput = {
     package_id: prepared.packageId,
     file_count: prepared.files.length,
@@ -495,7 +695,10 @@ export async function uploadPreparedSpatialPackage(
   for (let attempt = 1; attempt <= finalizationAttempts; attempt += 1) {
     try {
       if (options.incidentTarget) {
-        return await api.finalizeIncidentSpatialPackageFromBlob(
+        const finalize = prepared.role === 'omniverse_perimeter'
+          ? api.finalizeIncidentPerimeterPackageFromBlob.bind(api)
+          : api.finalizeIncidentSpatialPackageFromBlob.bind(api);
+        return await finalize(
           options.incidentTarget.fireId,
           {
             upload_id: grant.upload_id,
@@ -544,6 +747,9 @@ export async function uploadPreparedIncidentSpatialPackage(
   onProgress: (progress: SpatialPackageUploadProgress) => void,
   options: Omit<NonNullable<Parameters<typeof uploadPreparedSpatialPackage>[7]>, 'incidentTarget'> = {},
 ): Promise<AdminIncidentSpatialPackageImport> {
+  if (prepared.role === 'omniverse_perimeter') {
+    throw new Error('Le package de périmètres doit utiliser son import séparé.');
+  }
   const result = await uploadPreparedSpatialPackage(
     api,
     prepared.zoneId,
@@ -554,6 +760,35 @@ export async function uploadPreparedIncidentSpatialPackage(
     onProgress,
     { ...options, incidentTarget: { fireId, expectedIncidentVersion } },
   );
-  if (!('fire_id' in result)) throw new Error('La carte finalisée n’a pas été rattachée au projet.');
+  if (!('manifest_revision' in result)) throw new Error('La carte finalisée n’a pas été rattachée au projet.');
+  return result;
+}
+
+export async function uploadPreparedIncidentPerimeterPackage(
+  api: AdminApiClient,
+  fireId: string,
+  expectedIncidentVersion: number,
+  prepared: PreparedSpatialPackage,
+  reason: string,
+  idempotencyKey: string,
+  onProgress: (progress: SpatialPackageUploadProgress) => void,
+  options: Omit<NonNullable<Parameters<typeof uploadPreparedSpatialPackage>[7]>, 'incidentTarget'> = {},
+): Promise<AdminIncidentPerimeterPackageImport> {
+  if (prepared.role !== 'omniverse_perimeter') {
+    throw new Error('Le second import attend un package USD temporel de périmètres.');
+  }
+  const result = await uploadPreparedSpatialPackage(
+    api,
+    prepared.zoneId,
+    prepared.revision,
+    prepared,
+    reason,
+    idempotencyKey,
+    onProgress,
+    { ...options, incidentTarget: { fireId, expectedIncidentVersion } },
+  );
+  if (!('base_map_package_id' in result)) {
+    throw new Error('Les périmètres finalisés n’ont pas été rattachés à la carte du projet.');
+  }
   return result;
 }

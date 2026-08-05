@@ -58,6 +58,53 @@ async function validFiles(options: {
   return files;
 }
 
+async function omniverseFiles(role: 'map' | 'perimeter'): Promise<File[]> {
+  const entryPath = role === 'map' ? 'map.usda' : 'perimeters.usda';
+  const entry = packageFile(entryPath, '#usda 1.0', 'model/vnd.usd');
+  const sourceManifest = packageFile('source-usd/source/package-manifest.json', JSON.stringify({
+    zones: [{ zone_id: ZONE_ID, revision_id: 'R1' }],
+  }), 'application/json');
+  const assets = role === 'map' ? [entry, sourceManifest] : [entry];
+  const inventoryDocument = {
+    file_count: assets.length,
+    files: await Promise.all(assets.map(async (file) => ({
+      path: file.webkitRelativePath.replace('package-local/', ''),
+      byte_count: file.size,
+      sha256: await sha256Hex(file),
+    }))),
+  };
+  const inventory = packageFile('dependency-inventory.json', JSON.stringify(inventoryDocument), 'application/json');
+  const packageId = role === 'map' ? 'map-omniverse-r2' : 'perimeters-omniverse-r1';
+  const manifestDocument = role === 'map' ? {
+    schema: 'fireviewer.omniverse-pure-map-package.v1', status: 'active', package_id: packageId, revision: REVISION,
+    entry_stage: entryPath, entry_stage_sha256: await sha256Hex(entry),
+    dependency_inventory: { path: 'dependency-inventory.json', sha256: await sha256Hex(inventory), file_count: assets.length },
+  } : {
+    schema: 'fireviewer.omniverse-progressive-perimeter-package.v1', status: 'active', layer_package_id: packageId, revision: 1,
+    entry_layer: entryPath, entry_layer_sha256: await sha256Hex(entry),
+    dependency_inventory: { path: 'dependency-inventory.json', sha256: await sha256Hex(inventory), file_count: assets.length },
+  };
+  const manifest = packageFile('manifest.json', JSON.stringify(manifestDocument), 'application/json');
+  const contractDocument = role === 'map' ? {
+    schema: 'fireviewer.omniverse-map-upload-contract.v1', contract_status: 'active',
+    package: { package_id: packageId, revision: REVISION, entry_stage: entryPath, entry_stage_sha256: await sha256Hex(entry), manifest_sha256: await sha256Hex(manifest) },
+    release: { upload_allowed: true, automatic_publication: false },
+  } : {
+    schema: 'fireviewer.omniverse-progressive-perimeter-layer-contract.v1', contract_status: 'active',
+    layer_package: { layer_package_id: packageId, revision: 1, entry_layer: entryPath, entry_layer_sha256: await sha256Hex(entry), manifest_sha256: await sha256Hex(manifest) },
+    release: { layer_attachment_allowed: true, automatic_publication: false },
+    base_map: { package_id: 'map-omniverse-r2', revision: REVISION },
+    progression: { layer_crs: 'EPSG:2154', state_count: 21 },
+  };
+  const contractPath = role === 'map' ? 'contracts/map-contract.json' : 'contracts/perimeter-contract.json';
+  return [
+    manifest,
+    inventory,
+    packageFile(contractPath, JSON.stringify(contractDocument), 'application/json'),
+    ...assets,
+  ];
+}
+
 describe('préparation du package spatial côté navigateur', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -73,6 +120,21 @@ describe('préparation du package spatial côté navigateur', () => {
       'assets/model.glb',
     ]);
     expect(prepared.totalSizeBytes).toBe(prepared.files.reduce((total, item) => total + item.file.size, 0));
+  });
+
+  it('distingue une carte Omniverse complète et ses périmètres séparés', async () => {
+    const map = await prepareSpatialPackage(await omniverseFiles('map'));
+    const perimeters = await prepareSpatialPackage(await omniverseFiles('perimeter'), ZONE_ID, REVISION);
+
+    expect(map).toMatchObject({
+      role: 'omniverse_map', packageId: 'map-omniverse-r2', zoneId: ZONE_ID, revision: REVISION,
+    });
+    expect(perimeters).toMatchObject({
+      role: 'omniverse_perimeter', packageId: 'perimeters-omniverse-r1', zoneId: ZONE_ID,
+      revision: REVISION, baseMapPackageId: 'map-omniverse-r2', stateCount: 21,
+    });
+    expect(map.files.map((item) => item.path)).toContain('map.usda');
+    expect(perimeters.files.map((item) => item.path)).toContain('perimeters.usda');
   });
 
   it.each([
@@ -118,6 +180,7 @@ describe('préparation du package spatial côté navigateur', () => {
 describe('envoi direct vers Vercel Blob', () => {
   it('utilise le multipart privé puis finalise exactement les objets reçus', async () => {
     const prepared: PreparedSpatialPackage = {
+      role: 'legacy_map',
       packageId: 'pkg-zone-r2',
       zoneId: ZONE_ID,
       revision: REVISION,
@@ -246,6 +309,7 @@ describe('envoi direct vers Vercel Blob', () => {
       contentType: 'application/vnd.fireviewer.tile',
     }));
     const prepared: PreparedSpatialPackage = {
+      role: 'legacy_map',
       packageId: 'pkg-session-r2',
       zoneId: ZONE_ID,
       revision: REVISION,
@@ -301,6 +365,7 @@ describe('envoi direct vers Vercel Blob', () => {
       contentType: 'application/vnd.fireviewer.tile',
     }));
     const prepared: PreparedSpatialPackage = {
+      role: 'legacy_map',
       packageId: 'pkg-concurrent-r2',
       zoneId: ZONE_ID,
       revision: REVISION,
@@ -356,6 +421,7 @@ describe('envoi direct vers Vercel Blob', () => {
 
   it('arrête le lot avec le chemin en erreur après épuisement des tentatives', async () => {
     const prepared: PreparedSpatialPackage = {
+      role: 'legacy_map',
       packageId: 'pkg-failure-r2',
       zoneId: ZONE_ID,
       revision: REVISION,
@@ -395,6 +461,7 @@ describe('envoi direct vers Vercel Blob', () => {
 
   it('réessaie uniquement la finalisation sans renvoyer les objets', async () => {
     const prepared: PreparedSpatialPackage = {
+      role: 'legacy_map',
       packageId: 'pkg-finalization-r2',
       zoneId: ZONE_ID,
       revision: REVISION,
